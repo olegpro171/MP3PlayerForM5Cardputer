@@ -140,6 +140,7 @@ struct Settings {
     int powerSaverMode = 0;        
     int seek = 0;
     String currentFolder = "";    // "" = All Music; "/FolderName" = specific folder
+    int volume = 128;
 };
 
 Settings userSettings;
@@ -262,14 +263,15 @@ public:
         userSettings.visMode = preferences.getInt("visMode", 0);
         userSettings.seek = preferences.getInt("seek", 5);
         userSettings.currentFolder = preferences.getString("curFolder", "");
+        userSettings.volume = preferences.getInt("volume", 128);
         preferences.end();
-        
+
         if(userSettings.apSSID.length() == 0) userSettings.apSSID = "Cardputer";
         if(userSettings.apPass.length() < 8) userSettings.apPass = "12345678";
     }
 
-    static void save(uint32_t currentPos = 0, int currentIndex = 0) {
-        if(currentPos > 0) { userSettings.lastPos = currentPos; userSettings.lastIndex = currentIndex; }
+    static void save(uint32_t currentPos = 0, int currentIndex = -1) {
+        if(currentIndex >= 0) { userSettings.lastPos = currentPos; userSettings.lastIndex = currentIndex; }
         preferences.begin("sam_music", false);
         preferences.putInt("brightness", userSettings.brightness);
         preferences.putInt("timeoutIndex", userSettings.timeoutIndex);
@@ -288,6 +290,7 @@ public:
         preferences.putInt("visMode", userSettings.visMode);
         preferences.putInt("seek", userSettings.seek);
         preferences.putString("curFolder", userSettings.currentFolder);
+        preferences.putInt("volume", userSettings.volume);
         preferences.end();
     }
 
@@ -302,7 +305,7 @@ public:
             file.println(userSettings.wifiPass); file.println(userSettings.isAPMode ? 1 : 0);
             file.println(userSettings.apSSID); file.println(userSettings.apPass);
             file.println(userSettings.powerSaverMode); file.println(userSettings.seek);
-            file.println(userSettings.currentFolder); file.close();
+            file.println(userSettings.currentFolder); file.println(userSettings.volume); file.close();
             
             M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
             M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("Exported to SD!"); delay(1000);
@@ -331,6 +334,7 @@ public:
             if(file.available()) userSettings.powerSaverMode = file.readStringUntil('\n').toInt();
             if(file.available()) userSettings.seek = file.readStringUntil('\n').toInt();
             if(file.available()) { userSettings.currentFolder = file.readStringUntil('\n'); userSettings.currentFolder.trim(); }
+            if(file.available()) userSettings.volume = file.readStringUntil('\n').toInt();
             file.close();
             save(); M5Cardputer.Display.setBrightness(userSettings.brightness);
             M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
@@ -856,7 +860,10 @@ public:
         else if (fnameLower.endsWith(".wav")) decoder = new AudioGeneratorWAV();
         else decoder = new AudioGeneratorMP3();
         
-        isPaused = false; return decoder->begin(id3, out);
+        isPaused = false;
+        bool ok = decoder->begin(id3, out);
+        if (ok) ConfigManager::save(startPos, currentIndex);
+        return ok;
     }
 
     void togglePause() {
@@ -2612,6 +2619,7 @@ void setup() {
     
     out = new AudioOutputM5Speaker(&M5Cardputer.Speaker, 0);
     out->begin();
+    M5Cardputer.Speaker.setVolume(userSettings.volume);
 
     // Restore g_activePlaylist from saved currentFolder
     g_activePlaylist = getPlaylistPath(userSettings.currentFolder);
@@ -2710,8 +2718,8 @@ void loop() {
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed('/')) { audioApp.seek(userSettings.seek); UIManager::drawNowPlaying(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed(',')) { audioApp.seek(-userSettings.seek); UIManager::drawNowPlaying(); }
-                else if (M5Cardputer.Keyboard.isKeyPressed(']')) { M5Cardputer.Speaker.setVolume(min(255, M5Cardputer.Speaker.getVolume() + 10)); UIManager::drawNowPlaying(); }
-                else if (M5Cardputer.Keyboard.isKeyPressed('[')) { M5Cardputer.Speaker.setVolume(max(0, M5Cardputer.Speaker.getVolume() - 10)); UIManager::drawNowPlaying(); }
+                else if (M5Cardputer.Keyboard.isKeyPressed(']')) { M5Cardputer.Speaker.setVolume(min(255, M5Cardputer.Speaker.getVolume() + 10)); userSettings.volume = M5Cardputer.Speaker.getVolume(); ConfigManager::save(); UIManager::drawNowPlaying(); }
+                else if (M5Cardputer.Keyboard.isKeyPressed('[')) { M5Cardputer.Speaker.setVolume(max(0, M5Cardputer.Speaker.getVolume() - 10)); userSettings.volume = M5Cardputer.Speaker.getVolume(); ConfigManager::save(); UIManager::drawNowPlaying(); }
                 break;
 
             case UI_SETTINGS:
