@@ -326,7 +326,7 @@ void applyTheme(int index) {
         case 1: // Cyberpunk
             C_BG_DARK = 0x0803; C_BG_LIGHT = 0x1866; C_HEADER = 0xA013;
             C_ACCENT = 0x07FF; C_PLAYING = 0xFFE0; C_HIGHLIGHT = 0xF800;
-            C_TEXT_MAIN = 0xFFFF; C_TEXT_DIM = 0xDC60;
+            C_TEXT_MAIN = 0xFFFF; C_TEXT_DIM = 0x7BEF;
             break;
         case 2: // Retro Amber — warm orange, no yellow
             C_BG_DARK = TFT_BLACK;
@@ -2105,20 +2105,20 @@ public:
 
         M5Cardputer.Display.setCursor(M5Cardputer.Display.width() - 55, yStart);
         switch(audioApp.shuffleMode) {
-            case SHUF_OFF: M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print(" "); break;
-            case SHUF_ALBUM: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("SA"); break;
-            case SHUF_ARTIST: M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("SR"); break;
-            case SHUF_GLOBAL: M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("SG"); break;
+            case SHUF_OFF:   M5Cardputer.Display.print(" "); break;
+            case SHUF_ALBUM: M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.print("SA"); break;
+            case SHUF_ARTIST: M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("SR"); break;
+            case SHUF_GLOBAL: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("SG"); break;
         }
 
         M5Cardputer.Display.setCursor(M5Cardputer.Display.width() - 28, yStart);
         switch(audioApp.loopMode) {
-            case NO_LOOP: M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("1x"); break;
-            case LOOP_ALL: M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("LP"); break;
+            case NO_LOOP: M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.print("1x"); break;
+            case LOOP_ALL: M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("LP"); break;
             case LOOP_ONE: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("1T"); break;
         }
 
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(xStart + 5, yStart + 15);
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(xStart + 5, yStart + 13);
         if (audioApp.currentTitle.length() > 0) {
             String t = truncateToFit(audioApp.currentTitle, M5Cardputer.Display.width() - PLAYLIST_WIDTH - 20);
             M5Cardputer.Display.print(t);
@@ -2126,14 +2126,18 @@ public:
 
         drawProgressBar();
 
-        int volY = yStart + 42; M5Cardputer.Display.setCursor(xStart + 5, volY); M5Cardputer.Display.setFont(&fonts::Font0);
-        M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("VOL "); M5Cardputer.Display.drawRect(xStart + 30, volY, 60, 6, C_BG_LIGHT);
+        int volY = yStart + 42; M5Cardputer.Display.setCursor(xStart + 5, volY); 
+        M5Cardputer.Display.setFont(&fonts::Font0);
+        M5Cardputer.Display.setTextColor(C_ACCENT); 
+        M5Cardputer.Display.print("VOL"); 
+        
+        M5Cardputer.Display.fillRect(xStart + 30, volY, 60, 6, C_BG_LIGHT);
         M5Cardputer.Display.fillRect(xStart + 31, volY + 1, (M5Cardputer.Speaker.getVolume() * 58) / 255, 4, C_ACCENT);
     }
 
     // Progress bar only — called every second in the loop, no flicker
     static void drawProgressBar() {
-        int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 5;
+        int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 6;
         int maxW = M5Cardputer.Display.width() - xStart - 10;
         float pos = 0, size = 1;
         if (audioApp.isPaused && audioApp.pausedSize > 0) {
@@ -2142,8 +2146,12 @@ public:
             pos = audioApp.id3->getPos(); size = audioApp.id3->getSize();
         }
         int curW = (size > 0) ? (int)(pos / size * maxW) : 0;
-        M5Cardputer.Display.fillRect(xStart-3, yStart+30-3, maxW+6, 9, C_BG_DARK); M5Cardputer.Display.fillRect(xStart, yStart+30, maxW, 3, C_BG_LIGHT);
-        M5Cardputer.Display.fillRect(xStart, yStart+30, min(curW, maxW), 3, C_HIGHLIGHT); M5Cardputer.Display.fillCircle(xStart + min(curW, maxW), yStart+30+1, 3, C_TEXT_MAIN);
+        M5Cardputer.Display.fillRect(xStart-3, yStart+30-3, maxW+6, 9, C_BG_DARK);
+        M5Cardputer.Display.fillRect(xStart, yStart+30, maxW, 3, C_BG_LIGHT);
+        M5Cardputer.Display.fillRect(xStart, yStart+30, min(curW, maxW), 3, C_HIGHLIGHT);
+
+        // Circle on track progress bar. Was disabled for a cleaner look
+        // M5Cardputer.Display.fillCircle(xStart + min(curW, maxW), yStart+30+1, 1, C_TEXT_MAIN);
     }
 
     static void drawVisNowPlayingInfo(int textX, int maxPixels) {
