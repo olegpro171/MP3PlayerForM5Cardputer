@@ -40,7 +40,8 @@ struct TagInfo {
     String artist;
     String title;
     uint8_t trackNo;
-    uint16_t duration;   // seconds (0 = unknown)
+    uint16_t duration;      // seconds (0 = unknown)
+    uint32_t audioOffset;   // byte offset where audio data begins (after ID3/metadata headers)
 };
 
 #define PLAYLIST_WIDTH 120
@@ -454,7 +455,7 @@ String getAlbumSongTrackStr(int songIdx) {
 
 bool readTagInfo(const char* filepath, TagInfo& out) {
     out.album = ""; out.artist = ""; out.title = "";
-    out.trackNo = 0; out.duration = 0;
+    out.trackNo = 0; out.duration = 0; out.audioOffset = 0;
     File f = SD.open(filepath);
     if (!f) return false;
     size_t fsize = f.size();
@@ -539,6 +540,7 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
             }
             if (foundSync) {
                 uint32_t frameStart = f.position() - 2;
+                out.audioOffset = frameStart;
                 f.seek(frameStart); uint8_t fh[4]; f.read(fh, 4);
                 int version = (fh[1] >> 3) & 3;   // 3=MPEG1, 2=MPEG2, 0=MPEG2.5
                 int brIdx = (fh[2] >> 4) & 0xF;
@@ -624,6 +626,7 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
             } else {
                 f.seek(f.position() + blockLen);
             }
+            if (lastBlock) out.audioOffset = f.position();
         }
         f.close(); return true;
     }
@@ -683,8 +686,10 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
                 out.trackNo = (uint8_t)((trkData[2] << 8) | trkData[3]);
                 pos += atomSize; continue;
             }
+            // mdat atom: actual audio data
+            if (strcmp(atomType, "mdat") == 0) { out.audioOffset = pos + 8; }
             pos += atomSize;
-            if (out.album.length() > 0 && out.trackNo > 0 && out.artist.length() > 0 && out.title.length() > 0) break;
+            if (out.album.length() > 0 && out.trackNo > 0 && out.artist.length() > 0 && out.title.length() > 0 && out.audioOffset > 0) break;
         }
         f.close(); return true;
     }
@@ -693,14 +698,20 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
     if (path.endsWith(".wav") && fsize > 44) {
         f.seek(0); uint8_t riff[12]; f.read(riff, 12);
         if (riff[0]=='R' && riff[1]=='I' && riff[2]=='F' && riff[3]=='F') {
-            // Find fmt chunk
+            // Find fmt and data chunks
+            uint32_t byteRate = 0;
             while (f.position() < fsize - 8) {
                 uint8_t ch[8]; f.read(ch, 8);
                 uint32_t ckSize = ch[4] | (ch[5]<<8) | (ch[6]<<16) | (ch[7]<<24);
                 if (ch[0]=='f' && ch[1]=='m' && ch[2]=='t' && ch[3]==' ' && ckSize >= 16) {
                     uint8_t fmt[16]; f.read(fmt, 16);
-                    uint32_t byteRate = fmt[8] | (fmt[9]<<8) | (fmt[10]<<16) | (fmt[11]<<24);
-                    if (byteRate > 0) out.duration = (uint16_t)((fsize - 44) / byteRate);
+                    byteRate = fmt[8] | (fmt[9]<<8) | (fmt[10]<<16) | (fmt[11]<<24);
+                    f.seek(f.position() + ckSize - 16);
+                    continue;
+                }
+                if (ch[0]=='d' && ch[1]=='a' && ch[2]=='t' && ch[3]=='a') {
+                    out.audioOffset = f.position();
+                    if (byteRate > 0) out.duration = (uint16_t)(ckSize / byteRate);
                     break;
                 }
                 f.seek(f.position() + ckSize);
@@ -714,7 +725,7 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
 // Forward declarations for album helpers used in AudioEngine
 String getAlbumSongPath(int songIdx);
 int findSongInPlaylist(const String& targetPath);
-uint16_t lookupDuration(int songIndex);
+void lookupSongMeta(int songIndex);
 
 // ==========================================
 // AUDIO ENGINE
@@ -735,6 +746,7 @@ public:
     uint32_t paused_at = 0;
     uint32_t pausedSize = 0;
     uint16_t currentDuration = 0;       // pre-calculated duration in seconds (from scan index)
+    uint32_t currentAudioOffset = 0;   // byte offset where audio data begins (after ID3/metadata)
     String currentTitle = "";
     String currentArtist = "";
     String currentAlbum = "";
@@ -765,12 +777,13 @@ public:
                             rawAlbumFile->println(filepath);
                         }
                         if (searchIdxFile) {
-                            // Format: filepath\tartist\ttitle\talbum\tduration
+                            // Format: filepath\tartist\ttitle\talbum\tduration\taudioOffset
                             searchIdxFile->print(filepath); searchIdxFile->print("\t");
                             searchIdxFile->print(tag.artist); searchIdxFile->print("\t");
                             searchIdxFile->print(tag.title); searchIdxFile->print("\t");
                             searchIdxFile->print(tag.album); searchIdxFile->print("\t");
-                            searchIdxFile->println(tag.duration);
+                            searchIdxFile->print(tag.duration); searchIdxFile->print("\t");
+                            searchIdxFile->println(tag.audioOffset);
                         }
                     }
                     M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
@@ -933,7 +946,7 @@ public:
         else decoder = new AudioGeneratorMP3();
         
         isPaused = false;
-        if (startPos == 0) currentDuration = lookupDuration(currentIndex);
+        if (startPos == 0) lookupSongMeta(currentIndex);
         bool ok = decoder->begin(id3, out);
         if (ok) ConfigManager::save(startPos, currentIndex);
         return ok;
@@ -947,23 +960,29 @@ public:
         } else if (isPaused) {
             String savedTitle = currentTitle, savedArtist = currentArtist, savedAlbum = currentAlbum;
             uint16_t savedDur = currentDuration;
+            uint32_t savedOffset = currentAudioOffset;
             play(currentIndex, paused_at);
             currentTitle = savedTitle; currentArtist = savedArtist; currentAlbum = savedAlbum;
             currentDuration = savedDur;
+            currentAudioOffset = savedOffset;
         }
     }
 
     void seek(int seconds) {
         if (!decoder || !decoder->isRunning() || !id3) return;
-        // Convert seconds to bytes using pre-calculated duration
-        float bps = (currentDuration > 0) ? (float)id3->getSize() / currentDuration : 32000;
+        // Convert seconds to bytes using audio-only size and pre-calculated duration
+        uint32_t audioSize = id3->getSize() - currentAudioOffset;
+        float bps = (currentDuration > 0 && audioSize > 0) ? (float)audioSize / currentDuration : 32000;
         int32_t newPos = id3->getPos() + (int32_t)(seconds * bps);
-        if (newPos < 0) newPos = 0; if (newPos > id3->getSize()) newPos = id3->getSize() - 1000;
+        if (newPos < (int32_t)currentAudioOffset) newPos = currentAudioOffset;
+        if (newPos > id3->getSize()) newPos = id3->getSize() - 1000;
         String savedTitle = currentTitle, savedArtist = currentArtist, savedAlbum = currentAlbum;
         uint16_t savedDur = currentDuration;
+        uint32_t savedOffset = currentAudioOffset;
         play(currentIndex, newPos);
         currentTitle = savedTitle; currentArtist = savedArtist; currentAlbum = savedAlbum;
         currentDuration = savedDur;
+        currentAudioOffset = savedOffset;
     }
 
     void next(bool autoPlay = false) {
@@ -1017,15 +1036,17 @@ public:
         play(currentIndex);
     }
 
-    // Elapsed seconds: duration * (currentPos / totalSize)
-    // Subtract buffer size (16KB) since the buffer pre-reads ahead of actual playback
+    // Elapsed = duration * (audioPos / audioSize)
+    // Subtracts audioOffset so the ratio covers only audio data, not metadata headers
     int getElapsedSec() {
         if (currentDuration == 0) return 0;
         uint32_t pos = isPaused ? paused_at : (id3 ? id3->getPos() : 0);
         uint32_t size = isPaused ? pausedSize : (id3 ? id3->getSize() : 0);
-        if (size == 0) return 0;
-        if (!isPaused && pos > 16384) pos -= 16384;
-        return (int)((uint64_t)currentDuration * pos / size);
+        if (size <= currentAudioOffset) return 0;
+        uint32_t audioSize = size - currentAudioOffset;
+        uint32_t audioPos = (pos > currentAudioOffset) ? pos - currentAudioOffset : 0;
+        if (audioPos > audioSize) audioPos = audioSize;
+        return (int)((uint64_t)currentDuration * audioPos / audioSize);
     }
 
     int getTotalSec() { return currentDuration; }
@@ -1054,26 +1075,32 @@ int findSongInPlaylist(const String& targetPath) {
     return -1;
 }
 
-// Look up pre-calculated duration (seconds) from search index for a given song index.
-// Search index lines: filepath\tartist\ttitle\talbum\tduration
-uint16_t lookupDuration(int songIndex) {
-    if (!SD.exists(SEARCH_INDEX_FILE)) return 0;
+// Look up pre-calculated duration and audio offset from search index.
+// Search index lines: filepath\tartist\ttitle\talbum\tduration\taudioOffset
+void lookupSongMeta(int songIndex) {
+    audioApp.currentDuration = 0;
+    audioApp.currentAudioOffset = 0;
+    if (!SD.exists(SEARCH_INDEX_FILE)) return;
     File f = SD.open(SEARCH_INDEX_FILE);
-    if (!f) return 0;
+    if (!f) return;
     int idx = 0;
     while (f.available()) {
         String line = f.readStringUntil('\n');
         if (idx == songIndex) {
             f.close();
-            // Find last tab — duration is the last field
+            line.trim();
+            // Parse last two tab-separated fields: duration and audioOffset
             int lastTab = line.lastIndexOf('\t');
-            if (lastTab >= 0) return (uint16_t)line.substring(lastTab + 1).toInt();
-            return 0;
+            if (lastTab < 0) return;
+            audioApp.currentAudioOffset = (uint32_t)line.substring(lastTab + 1).toInt();
+            String rest = line.substring(0, lastTab);
+            int prevTab = rest.lastIndexOf('\t');
+            if (prevTab >= 0) audioApp.currentDuration = (uint16_t)rest.substring(prevTab + 1).toInt();
+            return;
         }
         idx++;
     }
     f.close();
-    return 0;
 }
 
 // ==========================================
