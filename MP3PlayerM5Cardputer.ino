@@ -150,6 +150,8 @@ struct Settings {
     int seek = 0;
     int volume = 128;
     bool showSplash = true;
+    int lastAlbumIdx = -1;      // album index for resume (-1 = no album context)
+    int lastAlbumTrack = 0;     // track index within album
 };
 
 Settings userSettings;
@@ -194,6 +196,7 @@ int g_albumSongCursor = 0;
 int g_albumSongScrollOffset = 0;
 String g_currentAlbumName = "";
 String g_currentAlbumArtist = "";
+int g_currentAlbumIdx = -1;                 // album index currently loaded in g_albumSongOffsets
 bool g_albumPlaybackActive = false;         // true when playing within an album
 int g_albumPlaybackIndex = 0;               // index into g_albumSongOffsets for current track
 
@@ -286,6 +289,8 @@ public:
         userSettings.seek = preferences.getInt("seek", 5);
         userSettings.volume = preferences.getInt("volume", 128);
         userSettings.showSplash = preferences.getBool("showSplash", true);
+        userSettings.lastAlbumIdx = preferences.getInt("lastAlbIdx", -1);
+        userSettings.lastAlbumTrack = preferences.getInt("lastAlbTrk", 0);
         preferences.end();
 
         // Validate all settings to prevent crashes from corrupted NVS
@@ -323,6 +328,8 @@ public:
         preferences.putInt("seek", userSettings.seek);
         preferences.putInt("volume", userSettings.volume);
         preferences.putBool("showSplash", userSettings.showSplash);
+        preferences.putInt("lastAlbIdx", userSettings.lastAlbumIdx);
+        preferences.putInt("lastAlbTrk", userSettings.lastAlbumTrack);
         preferences.end();
     }
 
@@ -338,7 +345,8 @@ public:
             file.println(userSettings.apSSID); file.println(userSettings.apPass);
             file.println(userSettings.powerSaverMode); file.println(userSettings.seek);
             file.println(userSettings.volume);
-            file.println(userSettings.showSplash ? 1 : 0); file.close();
+            file.println(userSettings.showSplash ? 1 : 0);
+            file.println(userSettings.lastAlbumIdx); file.println(userSettings.lastAlbumTrack); file.close();
             
             M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
             M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("Exported to SD!"); delay(1000);
@@ -368,6 +376,8 @@ public:
             if(file.available()) userSettings.seek = file.readStringUntil('\n').toInt();
             if(file.available()) userSettings.volume = file.readStringUntil('\n').toInt();
             if(file.available()) userSettings.showSplash = (file.readStringUntil('\n').toInt() == 1);
+            if(file.available()) userSettings.lastAlbumIdx = file.readStringUntil('\n').toInt();
+            if(file.available()) userSettings.lastAlbumTrack = file.readStringUntil('\n').toInt();
             file.close();
             save(); M5Cardputer.Display.setBrightness(userSettings.brightness);
             M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
@@ -447,6 +457,7 @@ void loadAlbumSongs(int albumIdx) {
     g_albumSongOffsets.clear();
     g_albumSongCursor = 0;
     g_albumSongScrollOffset = 0;
+    g_currentAlbumIdx = albumIdx;
     if (albumIdx < 0 || (size_t)albumIdx >= g_albumOffsets.size()) return;
     File f = SD.open(ALBUM_INDEX_FILE);
     if (!f) return;
@@ -1083,6 +1094,7 @@ public:
                     else {
                         // Album finished: go to first track and pause
                         g_albumPlaybackIndex = 0;
+                        userSettings.lastAlbumTrack = 0;
                         String firstPath = getAlbumSongPath(0);
                         int globalIdx = findSongInPlaylist(firstPath);
                         if (globalIdx >= 0) { play(globalIdx); togglePause(); }
@@ -1091,6 +1103,7 @@ public:
                     }
                 }
             }
+            userSettings.lastAlbumTrack = g_albumPlaybackIndex;
             String songPath = getAlbumSongPath(g_albumPlaybackIndex);
             int globalIdx = findSongInPlaylist(songPath);
             if (globalIdx >= 0) play(globalIdx); else { g_albumPlaybackActive = false; }
@@ -1116,6 +1129,7 @@ public:
                 g_albumPlaybackIndex--;
                 if (g_albumPlaybackIndex < 0) g_albumPlaybackIndex = (int)g_albumSongOffsets.size() - 1;
             }
+            userSettings.lastAlbumTrack = g_albumPlaybackIndex;
             String songPath = getAlbumSongPath(g_albumPlaybackIndex);
             int globalIdx = findSongInPlaylist(songPath);
             if (globalIdx >= 0) play(globalIdx); else { g_albumPlaybackActive = false; }
@@ -2868,6 +2882,13 @@ void setup() {
 
     // Load album index for sidebar
     loadAlbumIndex();
+
+    // Restore album playback context if saved
+    if (userSettings.lastAlbumIdx >= 0 && userSettings.lastAlbumIdx < (int)g_albumOffsets.size()) {
+        loadAlbumSongs(userSettings.lastAlbumIdx);
+        g_albumPlaybackActive = true;
+        g_albumPlaybackIndex = constrain(userSettings.lastAlbumTrack, 0, max(0, (int)g_albumSongOffsets.size() - 1));
+    }
     
     UIManager::drawBaseUI(); lastInputTime = millis();
 }
@@ -3142,6 +3163,7 @@ void loop() {
                     if (g_searchResults.size() > 0) {
                         int songIdx = g_searchResults[g_searchCursor];
                         g_albumPlaybackActive = false; // Exit album-scoped playback
+                        userSettings.lastAlbumIdx = -1; // Clear album context
                         audioApp.play(songIdx);
                         currentState = UI_PLAYER;
                         UIManager::drawBaseUI();
@@ -3191,6 +3213,8 @@ void loop() {
                             audioApp.play(globalIdx);
                             g_albumPlaybackActive = true;
                             g_albumPlaybackIndex = g_albumSongCursor;
+                            userSettings.lastAlbumIdx = g_currentAlbumIdx;
+                            userSettings.lastAlbumTrack = g_albumPlaybackIndex;
                             ConfigManager::save(audioApp.id3 ? audioApp.id3->getPos() : 0, audioApp.currentIndex);
                         }
                         currentState = UI_PLAYER;
