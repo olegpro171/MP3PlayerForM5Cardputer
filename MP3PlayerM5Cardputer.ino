@@ -196,6 +196,23 @@ int g_sidebarScrollOffset = 0;
 std::vector<uint32_t> g_albumSongOffsets;   // byte offsets of song lines in current album
 int g_albumSongCursor = 0;
 int g_albumSongScrollOffset = 0;
+String g_trackNumInput = "";               // accumulated digit string for track jump
+unsigned long g_trackNumLastInput = 0;     // millis of last digit press
+#define TRACK_NUM_TIMEOUT 1500             // ms before digit input resets
+
+// Apply entered track number to cursor (1-indexed for user, 0-indexed internally)
+void applyTrackNumInput() {
+    if (g_trackNumInput.length() == 0 || g_albumSongOffsets.size() == 0) return;
+    int trackNum = g_trackNumInput.toInt();
+    if (trackNum < 1) trackNum = 1;
+    int idx = trackNum - 1; // convert to 0-indexed
+    if (idx >= (int)g_albumSongOffsets.size()) idx = (int)g_albumSongOffsets.size() - 1;
+    g_albumSongCursor = idx;
+    // Adjust scroll to keep cursor visible
+    if (g_albumSongCursor < g_albumSongScrollOffset) g_albumSongScrollOffset = g_albumSongCursor;
+    if (g_albumSongCursor >= g_albumSongScrollOffset + MAX_VISIBLE_ROWS)
+        g_albumSongScrollOffset = g_albumSongCursor - MAX_VISIBLE_ROWS + 1;
+}
 String g_currentAlbumName = "";
 String g_currentAlbumArtist = "";
 int g_currentAlbumIdx = -1;                 // album index currently loaded in g_albumSongOffsets
@@ -1656,9 +1673,14 @@ public:
     static void drawAlbumSongsFooter() {
         int footerY = M5Cardputer.Display.height() - BOTTOM_BAR_HEIGHT;
         M5Cardputer.Display.fillRect(0, footerY, M5Cardputer.Display.width(), BOTTOM_BAR_HEIGHT, C_HEADER);
-        M5Cardputer.Display.setTextColor(C_TEXT_DIM, C_HEADER);
         M5Cardputer.Display.setCursor(5, footerY + 4);
-        M5Cardputer.Display.print("Enter:Play  ;/.:Scroll  `:Back");
+        if (g_trackNumInput.length() > 0) {
+            M5Cardputer.Display.setTextColor(C_ACCENT, C_HEADER);
+            M5Cardputer.Display.print("Track: "); M5Cardputer.Display.print(g_trackNumInput); M5Cardputer.Display.print("_");
+        } else {
+            M5Cardputer.Display.setTextColor(C_TEXT_DIM, C_HEADER);
+            M5Cardputer.Display.print("Enter:Play ;/.:Scroll 0-9:Jump");
+        }
     }
 
     // Redraws only the song list rows — not the header or footer.
@@ -3070,6 +3092,7 @@ void loop() {
                             UIManager::drawPlaylist();
                         } else {
                             // Open album
+                            g_trackNumInput = "";
                             loadAlbumSongs(row.dataIdx);
                             // Position cursor on currently playing song if in this album
                             String currentPath = audioApp.getSongPath(audioApp.currentIndex);
@@ -3298,12 +3321,31 @@ void loop() {
             // ALBUM SONGS STATE
             // --------------------------------------------------
             case UI_ALBUM_SONGS:
+                {
+                // Auto-clear digit input after timeout
+                if (g_trackNumInput.length() > 0 && millis() - g_trackNumLastInput > TRACK_NUM_TIMEOUT) {
+                    g_trackNumInput = "";
+                    UIManager::drawAlbumSongsFooter(); // restore normal footer
+                }
+
+                auto status = M5Cardputer.Keyboard.keysState();
+
                 if (M5Cardputer.Keyboard.isKeyPressed('`')) {
-                    // Back to player (album list)
+                    g_trackNumInput = "";
                     currentState = UI_PLAYER;
                     UIManager::drawBaseUI();
                 }
+                else if (status.del) {
+                    if (g_trackNumInput.length() > 0) {
+                        g_trackNumInput.remove(g_trackNumInput.length() - 1);
+                        g_trackNumLastInput = millis();
+                        if (g_trackNumInput.length() > 0) applyTrackNumInput();
+                        UIManager::drawAlbumSongsList();
+                        UIManager::drawAlbumSongsFooter();
+                    }
+                }
                 else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
+                    g_trackNumInput = "";
                     if (g_albumSongOffsets.size() > 0) {
                         g_albumSongCursor--;
                         if (g_albumSongCursor < 0) g_albumSongCursor = (int)g_albumSongOffsets.size() - 1;
@@ -3314,6 +3356,7 @@ void loop() {
                     UIManager::drawAlbumSongsList();
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed('.')) {
+                    g_trackNumInput = "";
                     if (g_albumSongOffsets.size() > 0) {
                         g_albumSongCursor++;
                         if (g_albumSongCursor >= (int)g_albumSongOffsets.size()) { g_albumSongCursor = 0; g_albumSongScrollOffset = 0; }
@@ -3321,7 +3364,8 @@ void loop() {
                     }
                     UIManager::drawAlbumSongsList();
                 }
-                else if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
+                else if (status.enter) {
+                    g_trackNumInput = "";
                     if (g_albumSongOffsets.size() > 0) {
                         String songPath = getAlbumSongPath(g_albumSongCursor);
                         int globalIdx = findSongInPlaylist(songPath);
@@ -3337,6 +3381,23 @@ void loop() {
                         currentState = UI_PLAYER;
                         UIManager::drawBaseUI();
                     }
+                }
+                else {
+                    // Check for digit input
+                    bool digitEntered = false;
+                    for (char c : status.word) {
+                        if (c >= '0' && c <= '9') {
+                            g_trackNumInput += c;
+                            g_trackNumLastInput = millis();
+                            digitEntered = true;
+                        }
+                    }
+                    if (digitEntered) {
+                        applyTrackNumInput();
+                        UIManager::drawAlbumSongsList();
+                        UIManager::drawAlbumSongsFooter();
+                    }
+                }
                 }
                 break;
         }
