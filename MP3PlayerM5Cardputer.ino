@@ -3050,7 +3050,16 @@ void loop() {
     }
 
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
-        if (isScreenOff) { M5Cardputer.Display.wakeup(); M5Cardputer.Display.setBrightness(userSettings.brightness); isScreenOff = false; lastInputTime = millis(); UIManager::drawBaseUI(); return; }
+        if (isScreenOff) {
+            M5Cardputer.Display.wakeup(); M5Cardputer.Display.setBrightness(userSettings.brightness); isScreenOff = false; lastInputTime = millis();
+            if (currentState == UI_ALBUM_SONGS) UIManager::drawAlbumSongs();
+            else if (currentState == UI_SETTINGS) UIManager::drawSettings();
+            else if (currentState == UI_HELP) UIManager::drawHelp();
+            else if (currentState == UI_SEARCH) UIManager::drawSearch();
+            else if (currentState == UI_TRACK_INFO) UIManager::drawTrackInfo();
+            else UIManager::drawBaseUI();
+            return;
+        }
         lastInputTime = millis();
 
         switch (currentState) {
