@@ -821,7 +821,11 @@ public:
         if (!decoder || !decoder->isRunning() || !id3) return;
         int32_t newPos = id3->getPos() + (seconds * 16000);
         if (newPos < 0) newPos = 0; if (newPos > id3->getSize()) newPos = id3->getSize() - 1000;
+        // Preserve metadata across seek — play() clears it, and seeking
+        // past the ID3 header means the callback won't repopulate it.
+        String savedTitle = currentTitle, savedArtist = currentArtist, savedAlbum = currentAlbum;
         play(currentIndex, newPos);
+        currentTitle = savedTitle; currentArtist = savedArtist; currentAlbum = savedAlbum;
     }
 
     void next(bool autoPlay = false) {
