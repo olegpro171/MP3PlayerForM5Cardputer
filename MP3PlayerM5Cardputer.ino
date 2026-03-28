@@ -3337,10 +3337,7 @@ void loop() {
                 }
                 else if (status.del) {
                     if (g_trackNumInput.length() > 0) {
-                        g_trackNumInput.remove(g_trackNumInput.length() - 1);
-                        g_trackNumLastInput = millis();
-                        if (g_trackNumInput.length() > 0) applyTrackNumInput();
-                        UIManager::drawAlbumSongsList();
+                        g_trackNumInput = "";
                         UIManager::drawAlbumSongsFooter();
                     }
                 }
