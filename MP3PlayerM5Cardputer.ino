@@ -171,12 +171,26 @@ int g_searchScrollOffset = 0;
 
 // Album browsing globals
 std::vector<uint32_t> g_albumOffsets;       // byte offsets of '@' lines in albums.idx
-int g_albumCursor = 0;
-int g_albumScrollOffset = 0;
+std::vector<String> g_artistNames;          // unique artist names in order
+std::vector<String> g_albumNames;           // album names parallel to g_albumOffsets
+std::vector<int> g_albumArtistMap;          // artist index per album
+std::vector<bool> g_artistExpanded;         // collapse state per artist
+
+// Sidebar display rows
+struct SidebarRow {
+    bool isArtist;    // true = artist header, false = album
+    int dataIdx;      // artist index (if isArtist) or album index (if !isArtist)
+};
+std::vector<SidebarRow> g_sidebarRows;
+int g_sidebarCursor = 0;
+int g_sidebarScrollOffset = 0;
+
+// Album songs state
 std::vector<uint32_t> g_albumSongOffsets;   // byte offsets of song lines in current album
 int g_albumSongCursor = 0;
 int g_albumSongScrollOffset = 0;
 String g_currentAlbumName = "";
+String g_currentAlbumArtist = "";
 bool g_albumPlaybackActive = false;         // true when playing within an album
 int g_albumPlaybackIndex = 0;               // index into g_albumSongOffsets for current track
 
@@ -367,35 +381,62 @@ void applyCpuFrequency() {
 // ==========================================
 // ALBUM INDEX HELPERS
 // ==========================================
+void rebuildSidebarRows() {
+    g_sidebarRows.clear();
+    for (size_t ai = 0; ai < g_artistNames.size(); ai++) {
+        g_sidebarRows.push_back({true, (int)ai});
+        if (g_artistExpanded[ai]) {
+            for (size_t alb = 0; alb < g_albumOffsets.size(); alb++) {
+                if (g_albumArtistMap[alb] == (int)ai) {
+                    g_sidebarRows.push_back({false, (int)alb});
+                }
+            }
+        }
+    }
+}
+
 bool loadAlbumIndex() {
     g_albumOffsets.clear();
-    g_albumCursor = 0;
-    g_albumScrollOffset = 0;
+    g_artistNames.clear();
+    g_albumNames.clear();
+    g_albumArtistMap.clear();
+    g_artistExpanded.clear();
+    g_sidebarCursor = 0;
+    g_sidebarScrollOffset = 0;
     if (!SD.exists(ALBUM_INDEX_FILE)) return false;
     File f = SD.open(ALBUM_INDEX_FILE);
     if (!f) return false;
     String header = f.readStringUntil('\n'); header.trim();
-    if (header != "ALBUM_INDEX_V1") { f.close(); return false; }
+    if (header != "ALBUM_INDEX_V2" && header != "ALBUM_INDEX_V1") { f.close(); return false; }
+    int currentArtistIdx = -1;
     while (f.available()) {
         uint32_t pos = f.position();
         String line = f.readStringUntil('\n'); line.trim();
-        if (line.startsWith("@")) {
+        if (line.startsWith("#")) {
+            String artistName = line.substring(1);
+            g_artistNames.push_back(artistName);
+            g_artistExpanded.push_back(true);
+            currentArtistIdx = g_artistNames.size() - 1;
+        } else if (line.startsWith("@")) {
             g_albumOffsets.push_back(pos);
+            g_albumNames.push_back(line.substring(1));
+            g_albumArtistMap.push_back(currentArtistIdx >= 0 ? currentArtistIdx : 0);
         }
     }
     f.close();
+    // If V1 format (no artist headers), create a single "[Unknown]" artist
+    if (g_artistNames.empty() && g_albumOffsets.size() > 0) {
+        g_artistNames.push_back("[Unknown]");
+        g_artistExpanded.push_back(true);
+        for (size_t i = 0; i < g_albumArtistMap.size(); i++) g_albumArtistMap[i] = 0;
+    }
+    rebuildSidebarRows();
     return (g_albumOffsets.size() > 0);
 }
 
 String getAlbumName(int albumIdx) {
-    if (albumIdx < 0 || (size_t)albumIdx >= g_albumOffsets.size()) return "";
-    File f = SD.open(ALBUM_INDEX_FILE);
-    if (!f) return "";
-    f.seek(g_albumOffsets[albumIdx]);
-    String line = f.readStringUntil('\n'); line.trim();
-    f.close();
-    if (line.startsWith("@")) line = line.substring(1);
-    return line;
+    if (albumIdx < 0 || (size_t)albumIdx >= g_albumNames.size()) return "";
+    return g_albumNames[albumIdx];
 }
 
 void loadAlbumSongs(int albumIdx) {
@@ -419,6 +460,7 @@ void loadAlbumSongs(int albumIdx) {
     }
     f.close();
     g_currentAlbumName = getAlbumName(albumIdx);
+    g_currentAlbumArtist = (albumIdx >= 0 && albumIdx < (int)g_albumArtistMap.size() && g_albumArtistMap[albumIdx] >= 0 && g_albumArtistMap[albumIdx] < (int)g_artistNames.size()) ? g_artistNames[g_albumArtistMap[albumIdx]] : "";
 }
 
 String getAlbumSongPath(int songIdx) {
@@ -771,10 +813,12 @@ public:
                         readTagInfo(filepath.c_str(), tag);
                         if (rawAlbumFile) {
                             String albumName = tag.album.length() > 0 ? tag.album : "[No Album]";
-                            albumName.replace("\t", " ");
+                            String artistName = tag.artist.length() > 0 ? tag.artist : "[Unknown]";
+                            albumName.replace("\t", " "); artistName.replace("\t", " ");
                             rawAlbumFile->print(albumName); rawAlbumFile->print("\t");
                             rawAlbumFile->print(tag.trackNo); rawAlbumFile->print("\t");
-                            rawAlbumFile->println(filepath);
+                            rawAlbumFile->print(filepath); rawAlbumFile->print("\t");
+                            rawAlbumFile->println(artistName);
                         }
                         if (searchIdxFile) {
                             // Format: filepath\tartist\ttitle\talbum\tduration\taudioOffset
@@ -802,60 +846,92 @@ public:
 
         if (!SD.exists(ALBUM_RAW_FILE)) return;
 
-        // Pass 1: collect unique album names
-        std::vector<String> albums;
+        // Pass 1: collect unique albums with their most common artist
+        // Raw format: AlbumName\tTrackNo\tFilePath\tArtist
+        struct AlbumInfo { String name; String artist; };
+        std::vector<AlbumInfo> albums;
         File raw = SD.open(ALBUM_RAW_FILE);
         if (!raw) return;
+        struct RawEntry { String album; String artist; uint8_t trackNo; String path; };
+        std::vector<RawEntry> rawEntries;
         while (raw.available()) {
             String line = raw.readStringUntil('\n'); line.trim();
             int tab1 = line.indexOf('\t');
             if (tab1 < 0) continue;
+            int tab2 = line.indexOf('\t', tab1 + 1);
+            if (tab2 < 0) continue;
+            int tab3 = line.indexOf('\t', tab2 + 1);
             String albumName = line.substring(0, tab1);
-            bool found = false;
-            for (size_t i = 0; i < albums.size(); i++) {
-                if (albums[i] == albumName) { found = true; break; }
-            }
-            if (!found) albums.push_back(albumName);
+            uint8_t trackNo = (uint8_t)line.substring(tab1 + 1, tab2).toInt();
+            String filePath = (tab3 >= 0) ? line.substring(tab2 + 1, tab3) : line.substring(tab2 + 1);
+            String artistName = (tab3 >= 0) ? line.substring(tab3 + 1) : "[Unknown]";
+            artistName.trim(); filePath.trim();
+            rawEntries.push_back({albumName, artistName, trackNo, filePath});
         }
         raw.close();
 
-        // Sort albums alphabetically, [No Album] last
-        for (size_t i = 0; i < albums.size(); i++) {
-            for (size_t j = i + 1; j < albums.size(); j++) {
-                bool swapNeeded = false;
-                if (albums[i] == "[No Album]") swapNeeded = true;
-                else if (albums[j] != "[No Album]") {
-                    String a = albums[i]; a.toLowerCase();
-                    String b = albums[j]; b.toLowerCase();
-                    if (a > b) swapNeeded = true;
+        // Determine unique albums with most common artist
+        for (size_t i = 0; i < rawEntries.size(); i++) {
+            bool found = false;
+            for (size_t j = 0; j < albums.size(); j++) {
+                if (albums[j].name == rawEntries[i].album) { found = true; break; }
+            }
+            if (!found) {
+                // Count artists for this album
+                String bestArtist = rawEntries[i].artist;
+                int bestCount = 0;
+                for (size_t k = i; k < rawEntries.size(); k++) {
+                    if (rawEntries[k].album != rawEntries[i].album) continue;
+                    int count = 0;
+                    for (size_t m = i; m < rawEntries.size(); m++) {
+                        if (rawEntries[m].album == rawEntries[i].album && rawEntries[m].artist == rawEntries[k].artist) count++;
+                    }
+                    if (count > bestCount) { bestCount = count; bestArtist = rawEntries[k].artist; }
                 }
-                if (swapNeeded) { String tmp = albums[i]; albums[i] = albums[j]; albums[j] = tmp; }
+                albums.push_back({rawEntries[i].album, bestArtist});
             }
         }
 
-        // Pass 2: for each album, collect its songs, sort by track, write to index
+        // Sort by artist (case-insensitive), then by album within artist. [Unknown] last.
+        for (size_t i = 0; i < albums.size(); i++) {
+            for (size_t j = i + 1; j < albums.size(); j++) {
+                bool swapNeeded = false;
+                String ai = albums[i].artist; ai.toLowerCase();
+                String aj = albums[j].artist; aj.toLowerCase();
+                String ni = albums[i].name; ni.toLowerCase();
+                String nj = albums[j].name; nj.toLowerCase();
+                if (albums[i].artist == "[Unknown]" && albums[j].artist != "[Unknown]") swapNeeded = true;
+                else if (albums[i].name == "[No Album]" && albums[j].name != "[No Album]") swapNeeded = true;
+                else if (albums[j].artist != "[Unknown]" && albums[j].name != "[No Album]") {
+                    if (ai > aj) swapNeeded = true;
+                    else if (ai == aj && ni > nj) swapNeeded = true;
+                }
+                if (swapNeeded) { AlbumInfo tmp = albums[i]; albums[i] = albums[j]; albums[j] = tmp; }
+            }
+        }
+
+        // Pass 2: write index grouped by artist
         if (SD.exists(ALBUM_INDEX_FILE)) SD.remove(ALBUM_INDEX_FILE);
         File idx = SD.open(ALBUM_INDEX_FILE, FILE_WRITE);
         if (!idx) return;
-        idx.println("ALBUM_INDEX_V1");
+        idx.println("ALBUM_INDEX_V2");
 
+        String lastArtist = "";
         for (size_t ai = 0; ai < albums.size(); ai++) {
-            // Collect songs for this album
+            // Write artist header if new artist
+            if (albums[ai].artist != lastArtist) {
+                idx.print("#"); idx.println(albums[ai].artist);
+                lastArtist = albums[ai].artist;
+            }
+
+            // Collect songs for this album from in-memory raw entries
             struct SongEntry { uint8_t trackNo; String path; };
             std::vector<SongEntry> songs;
-            raw = SD.open(ALBUM_RAW_FILE);
-            while (raw.available()) {
-                String line = raw.readStringUntil('\n'); line.trim();
-                int tab1 = line.indexOf('\t');
-                int tab2 = line.indexOf('\t', tab1 + 1);
-                if (tab1 < 0 || tab2 < 0) continue;
-                String albName = line.substring(0, tab1);
-                if (albName != albums[ai]) continue;
-                uint8_t trk = (uint8_t)line.substring(tab1 + 1, tab2).toInt();
-                String fpath = line.substring(tab2 + 1);
-                songs.push_back({trk, fpath});
+            for (size_t ri = 0; ri < rawEntries.size(); ri++) {
+                if (rawEntries[ri].album == albums[ai].name) {
+                    songs.push_back({rawEntries[ri].trackNo, rawEntries[ri].path});
+                }
             }
-            raw.close();
 
             // Sort by track number
             for (size_t i = 0; i < songs.size(); i++) {
@@ -867,7 +943,7 @@ public:
             }
 
             // Write album header and songs
-            idx.print("@"); idx.println(albums[ai]);
+            idx.print("@"); idx.println(albums[ai].name);
             for (size_t si = 0; si < songs.size(); si++) {
                 char trackStr[4]; sprintf(trackStr, "%02d", songs[si].trackNo);
                 idx.print(trackStr); idx.print("|"); idx.println(songs[si].path);
@@ -1319,61 +1395,59 @@ public:
 
     static void drawPlaylist() {
         M5Cardputer.Display.setFont(&fonts::Font0);
-        int totalAlbums = g_albumOffsets.size();
+        int totalRows = g_sidebarRows.size();
         int yPos = HEADER_HEIGHT + 2, xPos = 0;
 
-        if (totalAlbums == 0) {
-            M5Cardputer.Display.fillRect(0, HEADER_HEIGHT, PLAYLIST_WIDTH, M5Cardputer.Display.height() - HEADER_HEIGHT - BOTTOM_BAR_HEIGHT, C_BG_LIGHT);
-            M5Cardputer.Display.drawFastVLine(PLAYLIST_WIDTH, HEADER_HEIGHT, M5Cardputer.Display.height() - HEADER_HEIGHT - BOTTOM_BAR_HEIGHT, C_BG_DARK);
+        M5Cardputer.Display.fillRect(0, HEADER_HEIGHT, PLAYLIST_WIDTH, M5Cardputer.Display.height() - HEADER_HEIGHT - BOTTOM_BAR_HEIGHT, C_BG_LIGHT);
+        M5Cardputer.Display.drawFastVLine(PLAYLIST_WIDTH, HEADER_HEIGHT, M5Cardputer.Display.height() - HEADER_HEIGHT - BOTTOM_BAR_HEIGHT, C_BG_DARK);
+
+        if (totalRows == 0) {
             M5Cardputer.Display.setTextColor(C_TEXT_DIM);
             M5Cardputer.Display.setCursor(xPos + 5, yPos + 3);
             M5Cardputer.Display.print("No albums");
             return;
         }
 
-        int startIdx = max(0, min(g_albumCursor - (MAX_VISIBLE_ROWS / 2), totalAlbums - MAX_VISIBLE_ROWS));
+        int startIdx = max(0, min(g_sidebarCursor - (MAX_VISIBLE_ROWS / 2), totalRows - MAX_VISIBLE_ROWS));
 
-        // Pre-read all visible album names into RAM before touching the display.
-        // This eliminates the delay between clearing the sidebar and drawing rows,
-        // which was causing visible flicker.
-        String albumNames[MAX_VISIBLE_ROWS];
-        int rowCount = 0;
-        File f = SD.open(ALBUM_INDEX_FILE);
         for (int i = 0; i < MAX_VISIBLE_ROWS; i++) {
-            int actualIdx = startIdx + i; if (actualIdx >= totalAlbums) break;
-            if (f) {
-                f.seek(g_albumOffsets[actualIdx]);
-                String line = f.readStringUntil('\n'); line.trim();
-                if (line.startsWith("@")) line = line.substring(1);
-                albumNames[i] = line;
-            }
-            rowCount++;
-        }
-        if (f) f.close();
+            int ri = startIdx + i; if (ri >= totalRows) break;
+            SidebarRow& row = g_sidebarRows[ri];
+            bool isSelected = (ri == g_sidebarCursor);
 
-        // Now do all display writes with data already in RAM — no SD I/O gaps
-        M5Cardputer.Display.fillRect(0, HEADER_HEIGHT, PLAYLIST_WIDTH, M5Cardputer.Display.height() - HEADER_HEIGHT - BOTTOM_BAR_HEIGHT, C_BG_LIGHT);
-        M5Cardputer.Display.drawFastVLine(PLAYLIST_WIDTH, HEADER_HEIGHT, M5Cardputer.Display.height() - HEADER_HEIGHT - BOTTOM_BAR_HEIGHT, C_BG_DARK);
-
-        for (int i = 0; i < rowCount; i++) {
-            int actualIdx = startIdx + i;
-            bool isCurrentAlbum = (audioApp.currentAlbum.length() > 0 && albumNames[i] == audioApp.currentAlbum);
-
-            if (actualIdx == g_albumCursor) {
-                M5Cardputer.Display.fillRect(xPos + 2, yPos, PLAYLIST_WIDTH - 6, ROW_HEIGHT, C_ACCENT);
-                M5Cardputer.Display.setTextColor(C_BG_DARK);
-            } else if (isCurrentAlbum) {
-                M5Cardputer.Display.setTextColor(C_PLAYING);
+            if (row.isArtist) {
+                // Artist header row
+                String name = (row.dataIdx >= 0 && row.dataIdx < (int)g_artistNames.size()) ? g_artistNames[row.dataIdx] : "";
+                bool expanded = (row.dataIdx >= 0 && row.dataIdx < (int)g_artistExpanded.size()) ? g_artistExpanded[row.dataIdx] : true;
+                if (isSelected) {
+                    M5Cardputer.Display.fillRect(xPos + 2, yPos, PLAYLIST_WIDTH - 6, ROW_HEIGHT, C_ACCENT);
+                    M5Cardputer.Display.setTextColor(C_BG_DARK);
+                } else {
+                    M5Cardputer.Display.setTextColor(C_HIGHLIGHT);
+                }
+                String prefix = expanded ? "- " : "+ ";
+                String dispName = prefix + name;
+                if (dispName.length() > 16) dispName = dispName.substring(0, 15) + "~";
+                M5Cardputer.Display.setCursor(xPos + 3, yPos + 3);
+                M5Cardputer.Display.print(dispName);
             } else {
-                M5Cardputer.Display.setTextColor(C_TEXT_DIM);
+                // Album row (indented)
+                String name = (row.dataIdx >= 0 && row.dataIdx < (int)g_albumNames.size()) ? g_albumNames[row.dataIdx] : "";
+                bool isCurrentAlbum = (audioApp.currentAlbum.length() > 0 && name == audioApp.currentAlbum);
+                if (isSelected) {
+                    M5Cardputer.Display.fillRect(xPos + 2, yPos, PLAYLIST_WIDTH - 6, ROW_HEIGHT, C_ACCENT);
+                    M5Cardputer.Display.setTextColor(C_BG_DARK);
+                } else if (isCurrentAlbum) {
+                    M5Cardputer.Display.setTextColor(C_PLAYING);
+                } else {
+                    M5Cardputer.Display.setTextColor(C_TEXT_DIM);
+                }
+                String dispName = "  " + name;
+                if (dispName.length() > 16) dispName = dispName.substring(0, 15) + "~";
+                M5Cardputer.Display.setCursor(xPos + 5, yPos + 3);
+                if (isCurrentAlbum && !isSelected) M5Cardputer.Display.print(">");
+                M5Cardputer.Display.print(dispName);
             }
-
-            String dispName = albumNames[i];
-            if (dispName.length() > 16) dispName = dispName.substring(0, 15) + "~";
-
-            M5Cardputer.Display.setCursor(xPos + 5, yPos + 3);
-            if (isCurrentAlbum && actualIdx != g_albumCursor) M5Cardputer.Display.print("> ");
-            M5Cardputer.Display.print(dispName);
             yPos += ROW_HEIGHT;
         }
     }
@@ -1431,6 +1505,11 @@ public:
                         String fname = (slash >= 0) ? sp.substring(slash + 1) : sp;
                         int dotPos = fname.lastIndexOf('.');
                         if (dotPos > 0) fname = fname.substring(0, dotPos);
+                        // Strip "Artist - " prefix if it matches the album's artist
+                        if (g_currentAlbumArtist.length() > 0) {
+                            String prefix = g_currentAlbumArtist + " - ";
+                            if (fname.startsWith(prefix)) fname = fname.substring(prefix.length());
+                        }
                         rows[rowCount].displayName = trackStr + " " + fname;
                         if (rows[rowCount].displayName.length() > 30)
                             rows[rowCount].displayName = rows[rowCount].displayName.substring(0, 29) + "~";
@@ -2748,31 +2827,43 @@ void loop() {
                 if (M5Cardputer.Keyboard.isKeyPressed('`')) { currentState = UI_SETTINGS; UIManager::drawSettings(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed('i')) { currentState = UI_HELP; UIManager::drawHelp(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
-                    // Scroll albums up
-                    if (g_albumOffsets.size() > 0) {
-                        g_albumCursor = (g_albumCursor - 1 + g_albumOffsets.size()) % g_albumOffsets.size();
-                        // Adjust scroll
-                        if (g_albumCursor < g_albumScrollOffset) g_albumScrollOffset = g_albumCursor;
-                        if (g_albumCursor == (int)g_albumOffsets.size() - 1)
-                            g_albumScrollOffset = max(0, (int)g_albumOffsets.size() - MAX_VISIBLE_ROWS);
+                    if (g_sidebarRows.size() > 0) {
+                        g_sidebarCursor = (g_sidebarCursor - 1 + g_sidebarRows.size()) % g_sidebarRows.size();
+                        if (g_sidebarCursor < g_sidebarScrollOffset) g_sidebarScrollOffset = g_sidebarCursor;
+                        if (g_sidebarCursor == (int)g_sidebarRows.size() - 1)
+                            g_sidebarScrollOffset = max(0, (int)g_sidebarRows.size() - MAX_VISIBLE_ROWS);
                         UIManager::drawPlaylist();
                     }
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed('.')) {
-                    // Scroll albums down
-                    if (g_albumOffsets.size() > 0) {
-                        g_albumCursor = (g_albumCursor + 1) % g_albumOffsets.size();
-                        if (g_albumCursor >= g_albumScrollOffset + MAX_VISIBLE_ROWS) g_albumScrollOffset++;
-                        if (g_albumCursor == 0) g_albumScrollOffset = 0;
+                    if (g_sidebarRows.size() > 0) {
+                        g_sidebarCursor = (g_sidebarCursor + 1) % g_sidebarRows.size();
+                        if (g_sidebarCursor >= g_sidebarScrollOffset + MAX_VISIBLE_ROWS) g_sidebarScrollOffset++;
+                        if (g_sidebarCursor == 0) g_sidebarScrollOffset = 0;
                         UIManager::drawPlaylist();
                     }
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
-                    // Open selected album
-                    if (g_albumOffsets.size() > 0) {
-                        loadAlbumSongs(g_albumCursor);
-                        currentState = UI_ALBUM_SONGS;
-                        UIManager::drawAlbumSongs();
+                    if (g_sidebarRows.size() > 0 && g_sidebarCursor < (int)g_sidebarRows.size()) {
+                        SidebarRow& row = g_sidebarRows[g_sidebarCursor];
+                        if (row.isArtist) {
+                            // Toggle expand/collapse
+                            if (row.dataIdx >= 0 && row.dataIdx < (int)g_artistExpanded.size()) {
+                                g_artistExpanded[row.dataIdx] = !g_artistExpanded[row.dataIdx];
+                                rebuildSidebarRows();
+                                // Keep cursor on the same artist row
+                                for (int i = 0; i < (int)g_sidebarRows.size(); i++) {
+                                    if (g_sidebarRows[i].isArtist && g_sidebarRows[i].dataIdx == row.dataIdx) { g_sidebarCursor = i; break; }
+                                }
+                                if (g_sidebarCursor >= (int)g_sidebarRows.size()) g_sidebarCursor = g_sidebarRows.size() - 1;
+                            }
+                            UIManager::drawPlaylist();
+                        } else {
+                            // Open album
+                            loadAlbumSongs(row.dataIdx);
+                            currentState = UI_ALBUM_SONGS;
+                            UIManager::drawAlbumSongs();
+                        }
                     }
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed('p')) { audioApp.togglePause(); UIManager::drawNowPlaying(); }
