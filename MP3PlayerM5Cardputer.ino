@@ -200,6 +200,58 @@ int g_currentAlbumIdx = -1;                 // album index currently loaded in g
 bool g_albumPlaybackActive = false;         // true when playing within an album
 int g_albumPlaybackIndex = 0;               // index into g_albumSongOffsets for current track
 
+// Shuffle queues — prevent repeats by playing all tracks before reshuffling
+std::vector<int> g_albumShuffleQueue;       // permutation of album track indices
+int g_albumShufflePos = 0;                  // current position in album shuffle queue
+
+#define SHUFFLE_HISTORY_SIZE 20
+int g_shuffleHistory[SHUFFLE_HISTORY_SIZE]; // ring buffer of recently played global indices
+int g_shuffleHistoryLen = 0;
+
+// Build a shuffled queue of 0..N-1 using Fisher-Yates, placing startIdx at position 0
+void buildAlbumShuffleQueue(int count, int startIdx) {
+    g_albumShuffleQueue.clear();
+    for (int i = 0; i < count; i++) g_albumShuffleQueue.push_back(i);
+    // Fisher-Yates shuffle
+    for (int i = count - 1; i > 0; i--) {
+        int j = random(0, i + 1);
+        int tmp = g_albumShuffleQueue[i]; g_albumShuffleQueue[i] = g_albumShuffleQueue[j]; g_albumShuffleQueue[j] = tmp;
+    }
+    // Move startIdx to position 0 so current song is first
+    if (startIdx >= 0 && startIdx < count) {
+        for (int i = 0; i < count; i++) {
+            if (g_albumShuffleQueue[i] == startIdx) {
+                int tmp = g_albumShuffleQueue[0]; g_albumShuffleQueue[0] = g_albumShuffleQueue[i]; g_albumShuffleQueue[i] = tmp;
+                break;
+            }
+        }
+    }
+    g_albumShufflePos = 0;
+}
+
+// Pick a random global index that isn't in recent history
+int pickGlobalShuffle(int total) {
+    int pick;
+    int attempts = 0;
+    do {
+        pick = random(0, total);
+        bool inHistory = false;
+        for (int i = 0; i < g_shuffleHistoryLen; i++) {
+            if (g_shuffleHistory[i] == pick) { inHistory = true; break; }
+        }
+        if (!inHistory || attempts > 50) break; // safety: don't loop forever
+        attempts++;
+    } while (true);
+    // Add to history ring buffer
+    if (g_shuffleHistoryLen < SHUFFLE_HISTORY_SIZE) {
+        g_shuffleHistory[g_shuffleHistoryLen++] = pick;
+    } else {
+        // Shift left, add at end
+        for (int i = 0; i < SHUFFLE_HISTORY_SIZE - 1; i++) g_shuffleHistory[i] = g_shuffleHistory[i+1];
+        g_shuffleHistory[SHUFFLE_HISTORY_SIZE - 1] = pick;
+    }
+    return pick;
+}
 
 // ==========================================
 // HARDWARE CLASSES (FFT & SPEAKER)
@@ -1086,15 +1138,27 @@ public:
         // Album-scoped playback
         if (g_albumPlaybackActive && g_albumSongOffsets.size() > 0) {
             if (isShuffle) {
-                g_albumPlaybackIndex = random(0, g_albumSongOffsets.size());
+                // Advance in shuffle queue
+                if (g_albumShuffleQueue.empty()) buildAlbumShuffleQueue(g_albumSongOffsets.size(), g_albumPlaybackIndex);
+                g_albumShufflePos++;
+                if (g_albumShufflePos >= (int)g_albumShuffleQueue.size()) {
+                    if (loopMode == LOOP_ALL) { buildAlbumShuffleQueue(g_albumSongOffsets.size(), -1); g_albumShufflePos = 0; }
+                    else {
+                        g_albumPlaybackIndex = 0; userSettings.lastAlbumTrack = 0;
+                        String firstPath = getAlbumSongPath(0);
+                        int globalIdx = findSongInPlaylist(firstPath);
+                        if (globalIdx >= 0) { play(globalIdx); togglePause(); }
+                        else { stop(); g_albumPlaybackActive = false; }
+                        return;
+                    }
+                }
+                g_albumPlaybackIndex = g_albumShuffleQueue[g_albumShufflePos];
             } else {
                 g_albumPlaybackIndex++;
                 if (g_albumPlaybackIndex >= (int)g_albumSongOffsets.size()) {
                     if (loopMode == LOOP_ALL) g_albumPlaybackIndex = 0;
                     else {
-                        // Album finished: go to first track and pause
-                        g_albumPlaybackIndex = 0;
-                        userSettings.lastAlbumTrack = 0;
+                        g_albumPlaybackIndex = 0; userSettings.lastAlbumTrack = 0;
                         String firstPath = getAlbumSongPath(0);
                         int globalIdx = findSongInPlaylist(firstPath);
                         if (globalIdx >= 0) { play(globalIdx); togglePause(); }
@@ -1110,7 +1174,7 @@ public:
             return;
         }
 
-        if (isShuffle) currentIndex = random(0, songOffsets.size());
+        if (isShuffle) currentIndex = pickGlobalShuffle(songOffsets.size());
         else {
             currentIndex++;
             if ((size_t)currentIndex >= songOffsets.size()) { if (loopMode == LOOP_ALL) currentIndex = 0; else { stop(); currentIndex = 0; return; } }
@@ -1124,7 +1188,14 @@ public:
         // Album-scoped playback
         if (g_albumPlaybackActive && g_albumSongOffsets.size() > 0) {
             if (isShuffle) {
-                g_albumPlaybackIndex = random(0, g_albumSongOffsets.size());
+                // Go back in shuffle queue
+                if (g_albumShuffleQueue.size() > 0 && g_albumShufflePos > 0) {
+                    g_albumShufflePos--;
+                    g_albumPlaybackIndex = g_albumShuffleQueue[g_albumShufflePos];
+                } else {
+                    g_albumPlaybackIndex--;
+                    if (g_albumPlaybackIndex < 0) g_albumPlaybackIndex = (int)g_albumSongOffsets.size() - 1;
+                }
             } else {
                 g_albumPlaybackIndex--;
                 if (g_albumPlaybackIndex < 0) g_albumPlaybackIndex = (int)g_albumSongOffsets.size() - 1;
@@ -1136,7 +1207,7 @@ public:
             return;
         }
 
-        if (isShuffle) currentIndex = random(0, songOffsets.size());
+        if (isShuffle) currentIndex = pickGlobalShuffle(songOffsets.size());
         else { currentIndex--; if (currentIndex < 0) currentIndex = songOffsets.size() - 1; }
         play(currentIndex);
     }
@@ -3005,7 +3076,19 @@ void loop() {
                     g_searchQuery = ""; g_searchResults.clear(); g_searchCursor = 0; g_searchScrollOffset = 0;
                     currentState = UI_SEARCH; UIManager::drawSearch();
                 }
-                else if (M5Cardputer.Keyboard.isKeyPressed('f')) { audioApp.isShuffle = !audioApp.isShuffle; UIManager::drawNowPlaying(); }
+                else if (M5Cardputer.Keyboard.isKeyPressed('f')) {
+                    audioApp.isShuffle = !audioApp.isShuffle;
+                    if (audioApp.isShuffle) {
+                        // Build shuffle queue for current context
+                        if (g_albumPlaybackActive && g_albumSongOffsets.size() > 0)
+                            buildAlbumShuffleQueue(g_albumSongOffsets.size(), g_albumPlaybackIndex);
+                        g_shuffleHistoryLen = 0; // clear global history
+                    } else {
+                        g_albumShuffleQueue.clear(); g_albumShufflePos = 0;
+                        g_shuffleHistoryLen = 0;
+                    }
+                    UIManager::drawNowPlaying();
+                }
                 else if (M5Cardputer.Keyboard.isKeyPressed('l')) { audioApp.loopMode = (LoopState)((audioApp.loopMode + 1) % 3); UIManager::drawNowPlaying(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed('v')) {
                     userSettings.visMode = (userSettings.visMode + 1) % NUM_VIS_MODES;
@@ -3213,6 +3296,7 @@ void loop() {
                             audioApp.play(globalIdx);
                             g_albumPlaybackActive = true;
                             g_albumPlaybackIndex = g_albumSongCursor;
+                            if (audioApp.isShuffle) buildAlbumShuffleQueue(g_albumSongOffsets.size(), g_albumPlaybackIndex);
                             userSettings.lastAlbumIdx = g_currentAlbumIdx;
                             userSettings.lastAlbumTrack = g_albumPlaybackIndex;
                             ConfigManager::save(audioApp.id3 ? audioApp.id3->getPos() : 0, audioApp.currentIndex);
