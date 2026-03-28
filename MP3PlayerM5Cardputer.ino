@@ -1616,7 +1616,11 @@ public:
     // Full redraw of the now-playing area — called on state changes (play, pause, next, etc.)
     static void drawNowPlaying() {
         int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 5;
-        M5Cardputer.Display.fillRect(xStart, yStart, M5Cardputer.Display.width() - xStart, 50, C_BG_DARK);
+        int areaW = M5Cardputer.Display.width() - xStart;
+        // Clear status line (row 0), progress bar area (row 2), and volume area (row 3)
+        // but NOT the title row (row 1) — the marquee handles that to avoid flicker
+        M5Cardputer.Display.fillRect(xStart, yStart, areaW, 16, C_BG_DARK);           // status line
+        M5Cardputer.Display.fillRect(xStart, yStart + 27, areaW, 23, C_BG_DARK);      // progress + volume area
 
         M5Cardputer.Display.setFont(&fonts::lgfxJapanGothic_12); M5Cardputer.Display.setTextColor(audioApp.isPaused ? TFT_ORANGE : C_PLAYING);
         M5Cardputer.Display.setCursor(xStart + 5, yStart); M5Cardputer.Display.print(audioApp.isPaused ? "[PAUSED]" : "PLAYING >");
@@ -1630,20 +1634,8 @@ public:
             case LOOP_ONE: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("ONE"); break;
         }
 
-        // Title with marquee scroll
-        {
-            String title = audioApp.currentTitle.length() > 0 ? audioApp.currentTitle : "";
-            int titleAreaW = M5Cardputer.Display.width() - xStart - 10;
-            int titleX = xStart + 5, titleY = yStart + 16;
-            M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
-            int txtW = M5Cardputer.Display.textWidth(title.c_str());
-            g_marqueeTitle.update(title, txtW, titleAreaW);
-            M5Cardputer.Display.setClipRect(titleX, titleY, titleAreaW, 14);
-            M5Cardputer.Display.setCursor(titleX - g_marqueeTitle.scrollOffset, titleY);
-            M5Cardputer.Display.print(title);
-            M5Cardputer.Display.clearClipRect();
-        }
-
+        // Draw title immediately (marquee will take over for periodic updates)
+        drawMarqueeTitle();
         drawProgressBar();
 
         int volY = yStart + 42; M5Cardputer.Display.setCursor(xStart + 5, volY); M5Cardputer.Display.setFont(&fonts::Font0);
@@ -1657,10 +1649,11 @@ public:
         int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 5;
         int titleAreaW = M5Cardputer.Display.width() - xStart - 10;
         int titleX = xStart + 5, titleY = yStart + 16;
+        // Must set font BEFORE measuring text width — the title uses lgfxJapanGothic_12
+        M5Cardputer.Display.setFont(&fonts::lgfxJapanGothic_12);
         int txtW = M5Cardputer.Display.textWidth(title.c_str());
         if (txtW <= titleAreaW) return; // no scrolling needed
         g_marqueeTitle.update(title, txtW, titleAreaW);
-        M5Cardputer.Display.setFont(&fonts::lgfxJapanGothic_12);
         M5Cardputer.Display.fillRect(titleX, titleY, titleAreaW, 14, C_BG_DARK);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
         M5Cardputer.Display.setClipRect(titleX, titleY, titleAreaW, 14);
