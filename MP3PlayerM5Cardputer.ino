@@ -111,7 +111,7 @@ const char* helpLines[] = {
   "Btn A (2 Clicks): Next",
   "Btn A (3 Clicks): Prev",
   "Press any key to wake screen",
-  "Hold Btn A on boot: Reset",
+  "Hold Esc on boot: Reset",
   "--- ABOUT ---",
   "Made with <3 by SaM",
   "Sit back, relax, and",
@@ -2503,11 +2503,10 @@ void setup() {
 
     if (nvs_flash_init() != ESP_OK) { nvs_flash_erase(); nvs_flash_init(); }
 
-    // Factory reset: hold Button A (G0) during boot to erase all settings
-    // Use direct GPIO read — M5 button API may not be ready this early
-    pinMode(0, INPUT_PULLUP);
-    delay(50); // let pin settle
-    if (digitalRead(0) == LOW) {
+    // Factory reset: hold Esc/` key during boot to erase all settings
+    delay(100); // let keyboard controller settle
+    M5Cardputer.update();
+    if (M5Cardputer.Keyboard.isKeyPressed('`')) {
         nvs_flash_erase(); nvs_flash_init();
         M5Cardputer.Display.setRotation(1);
         M5Cardputer.Display.fillScreen(TFT_BLACK);
