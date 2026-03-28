@@ -3383,10 +3383,11 @@ void loop() {
                     }
                 }
                 else {
-                    // Check for digit input
+                    // Check for digit input (max 3 digits, then restart)
                     bool digitEntered = false;
                     for (char c : status.word) {
                         if (c >= '0' && c <= '9') {
+                            if (g_trackNumInput.length() >= 3) g_trackNumInput = "";
                             g_trackNumInput += c;
                             g_trackNumLastInput = millis();
                             digitEntered = true;
