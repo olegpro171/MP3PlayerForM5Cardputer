@@ -50,8 +50,8 @@ uint16_t C_BG_DARK, C_BG_LIGHT, C_HEADER, C_ACCENT, C_PLAYING, C_HIGHLIGHT, C_TE
 
 const int NUM_THEMES = 4;
 const char* themeLabels[] = { "Gunmetal Blue", "Cyberpunk", "Retro Amber", "Hacker Green" };
-const int NUM_VIS_MODES = 5;
-const char* visModeLabels[] = { "Classic Bars", "Waveform Line", "Circular Spikes", "Now Playing", "OFF" };
+const int NUM_VIS_MODES = 6;
+const char* visModeLabels[] = { "Classic Bars", "Waveform Line", "Circular Spikes", "Art + Info", "Now Playing", "OFF" };
 
 void applyTheme(int index) {
     switch(index) {
@@ -1335,7 +1335,7 @@ public:
         // Info modes (3, 4) render even when paused; audio modes (0-2) need active decoder
         bool isInfoMode = (userSettings.visMode == 3 || userSettings.visMode == 4);
         if (!isInfoMode && (!audioApp.decoder || !audioApp.decoder->isRunning() || audioApp.isPaused)) return;
-        if (userSettings.visMode >= NUM_VIS_MODES) return; // OFF
+        if (userSettings.visMode >= NUM_VIS_MODES - 1) return; // OFF (last mode)
 
         if (userSettings.visMode == 3) {
             // Animated art + info text
