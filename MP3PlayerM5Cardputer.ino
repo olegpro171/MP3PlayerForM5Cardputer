@@ -1343,37 +1343,41 @@ public:
     static void drawTrackInfo() {
         drawPopup("NOW PLAYING", "Press 'T' to Close");
         int px = 15, py = 15;
-        int contentY = py + 25;
-        int lineHeight = 14;
+        int y = py + 25;
+        int lh = 11; // line height — compact to fit more
+        int maxChars = 32; // full popup width at Font0
         M5Cardputer.Display.setFont(&fonts::Font0);
 
         String title = audioApp.currentTitle.length() > 0 ? audioApp.currentTitle : "(unknown)";
         String artist = audioApp.currentArtist.length() > 0 ? audioApp.currentArtist : "(unknown)";
         String album = audioApp.currentAlbum.length() > 0 ? audioApp.currentAlbum : "(unknown)";
 
-        // Label + value pairs, wrapping long values to 2 lines
-        M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.setCursor(px + 8, contentY);
-        M5Cardputer.Display.print("Title:");
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 8, contentY + lineHeight);
-        M5Cardputer.Display.print(title.substring(0, 28));
+        // Title — label on one line, value on next (may use 2 lines if very long)
+        M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.setCursor(px + 8, y);
+        M5Cardputer.Display.print("Title:"); y += lh;
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 8, y);
+        M5Cardputer.Display.print(title.substring(0, maxChars)); y += lh;
+        if (title.length() > maxChars) { M5Cardputer.Display.setCursor(px + 8, y); M5Cardputer.Display.print(title.substring(maxChars, maxChars * 2)); y += lh; }
 
-        M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.setCursor(px + 8, contentY + lineHeight * 2);
-        M5Cardputer.Display.print("Artist:");
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 50, contentY + lineHeight * 2);
-        M5Cardputer.Display.print(artist.substring(0, 22));
+        // Artist
+        M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.setCursor(px + 8, y);
+        M5Cardputer.Display.print("Artist:"); y += lh;
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 8, y);
+        M5Cardputer.Display.print(artist.substring(0, maxChars)); y += lh;
 
-        M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.setCursor(px + 8, contentY + lineHeight * 3);
-        M5Cardputer.Display.print("Album:");
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 50, contentY + lineHeight * 3);
-        M5Cardputer.Display.print(album.substring(0, 22));
+        // Album
+        M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.setCursor(px + 8, y);
+        M5Cardputer.Display.print("Album:"); y += lh;
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 8, y);
+        M5Cardputer.Display.print(album.substring(0, maxChars)); y += lh;
 
+        // Time
         int elapsed = audioApp.getElapsedSec(), total = audioApp.getTotalSec();
         char timeStr[32];
         sprintf(timeStr, "%d:%02d / %d:%02d", elapsed / 60, elapsed % 60, total / 60, total % 60);
-        M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.setCursor(px + 8, contentY + lineHeight * 4);
-        M5Cardputer.Display.print("Time:");
-        M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.setCursor(px + 50, contentY + lineHeight * 4);
-        M5Cardputer.Display.print(timeStr);
+        M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.setCursor(px + 8, y);
+        M5Cardputer.Display.print("Time: ");
+        M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print(timeStr);
     }
 
     static void drawHelp() {
