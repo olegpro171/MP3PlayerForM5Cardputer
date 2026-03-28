@@ -1460,7 +1460,7 @@ public:
                     M5Cardputer.Display.fillRect(2, yPos - 1, M5Cardputer.Display.width() - 4, ROW_HEIGHT, C_ACCENT);
                     M5Cardputer.Display.setTextColor(C_BG_DARK);
                 } else if (isPlaying) {
-                    M5Cardputer.Display.setTextColor(C_PLAYING);
+                    M5Cardputer.Display.setTextColor(TFT_RED);
                 } else {
                     M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
                 }
