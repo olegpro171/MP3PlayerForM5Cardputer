@@ -234,27 +234,28 @@ void buildShuffleQueue(ShuffleMode mode, int currentVal, int globalSongCount = 0
     if (mode == SHUF_ALBUM) {
         for (int i = 0; i < (int)g_albumSongOffsets.size(); i++) g_shuffleQueue.push_back(i);
     } else if (mode == SHUF_ARTIST) {
-        // Collect global indices of all songs by the current artist (across all their albums)
-        int artistIdx = -1;
-        if (g_currentAlbumIdx >= 0 && g_currentAlbumIdx < (int)g_albumArtistMap.size())
-            artistIdx = g_albumArtistMap[g_currentAlbumIdx];
-        if (artistIdx >= 0) {
-            for (int alb = 0; alb < (int)g_albumOffsets.size(); alb++) {
-                if (g_albumArtistMap[alb] != artistIdx) continue;
-                File f = SD.open(ALBUM_INDEX_FILE);
-                if (!f) continue;
-                f.seek(g_albumOffsets[alb]);
-                f.readStringUntil('\n'); // skip @AlbumName
+        // Collect global song indices for the current artist by scanning search index once.
+        // Search index lines match songOffsets order: line N = song index N.
+        // Format: filepath\tartist\ttitle\talbum\tduration\taudioOffset
+        String targetArtist = "";
+        if (g_currentAlbumIdx >= 0 && g_currentAlbumIdx < (int)g_albumArtistMap.size()) {
+            int ai = g_albumArtistMap[g_currentAlbumIdx];
+            if (ai >= 0 && ai < (int)g_artistNames.size()) targetArtist = g_artistNames[ai];
+        }
+        if (targetArtist.length() > 0 && SD.exists(SEARCH_INDEX_FILE)) {
+            String targetLower = targetArtist; targetLower.toLowerCase();
+            File f = SD.open(SEARCH_INDEX_FILE);
+            if (f) {
+                int idx = 0;
                 while (f.available()) {
                     String line = f.readStringUntil('\n'); line.trim();
-                    if (line.startsWith("@") || line.startsWith("#")) break;
-                    int pipePos = line.indexOf('|');
-                    if (pipePos >= 0) {
-                        String songPath = line.substring(pipePos + 1); songPath.trim();
-                        if (songPath.length() > 0 && !songPath.startsWith("/")) songPath = "/" + songPath;
-                        int gIdx = findSongInPlaylist(songPath);
-                        if (gIdx >= 0) g_shuffleQueue.push_back(gIdx);
+                    int t1 = line.indexOf('\t');
+                    int t2 = (t1 >= 0) ? line.indexOf('\t', t1 + 1) : -1;
+                    if (t1 >= 0 && t2 >= 0) {
+                        String artist = line.substring(t1 + 1, t2); artist.toLowerCase();
+                        if (artist == targetLower) g_shuffleQueue.push_back(idx);
                     }
+                    idx++;
                 }
                 f.close();
             }
