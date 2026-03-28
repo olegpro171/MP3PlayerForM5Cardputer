@@ -1135,7 +1135,7 @@ public:
 
         for (int i = 0; i < rowCount; i++) {
             int actualIdx = startIdx + i;
-            bool isCurrentAlbum = (g_albumPlaybackActive && albumNames[i] == audioApp.currentAlbum);
+            bool isCurrentAlbum = (audioApp.currentAlbum.length() > 0 && albumNames[i] == audioApp.currentAlbum);
 
             if (actualIdx == g_albumCursor) {
                 M5Cardputer.Display.fillRect(xPos + 2, yPos, PLAYLIST_WIDTH - 6, ROW_HEIGHT, C_ACCENT);
