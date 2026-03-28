@@ -1771,12 +1771,13 @@ public:
 
         M5Cardputer.Display.setCursor(M5Cardputer.Display.width() - 55, yStart);
         switch(audioApp.shuffleMode) {
-            case SHUF_OFF: M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("___ "); break;
-            case SHUF_ALBUM: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("SA "); break;
-            case SHUF_ARTIST: M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("SR "); break;
-            case SHUF_GLOBAL: M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("SG "); break;
+            case SHUF_OFF: M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("___"); break;
+            case SHUF_ALBUM: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("SA"); break;
+            case SHUF_ARTIST: M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("SR"); break;
+            case SHUF_GLOBAL: M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("SG"); break;
         }
 
+        M5Cardputer.Display.setCursor(M5Cardputer.Display.width() - 28, yStart);
         switch(audioApp.loopMode) {
             case NO_LOOP: M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("1x"); break;
             case LOOP_ALL: M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("LP"); break;
