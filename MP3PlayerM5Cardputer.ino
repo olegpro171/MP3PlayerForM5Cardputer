@@ -1209,12 +1209,10 @@ public:
 
         // Artist/Global shuffle: go back in shared queue
         if (shuffleMode == SHUF_ARTIST || shuffleMode == SHUF_GLOBAL) {
-            if (g_shuffleQueue.size() > 0 && g_shufflePos > 0) {
-                g_shufflePos--;
+            if (g_shuffleQueue.size() > 0) {
+                if (g_shufflePos > 0) g_shufflePos--;
+                else g_shufflePos = g_shuffleQueue.size() - 1; // wrap to end
                 play(g_shuffleQueue[g_shufflePos]);
-            } else {
-                currentIndex--; if (currentIndex < 0) currentIndex = songOffsets.size() - 1;
-                play(currentIndex);
             }
             return;
         }
@@ -1222,12 +1220,10 @@ public:
         // Album-scoped playback
         if (g_albumPlaybackActive && g_albumSongOffsets.size() > 0) {
             if (shuffleMode == SHUF_ALBUM) {
-                if (g_shuffleQueue.size() > 0 && g_shufflePos > 0) {
-                    g_shufflePos--;
+                if (g_shuffleQueue.size() > 0) {
+                    if (g_shufflePos > 0) g_shufflePos--;
+                    else g_shufflePos = g_shuffleQueue.size() - 1; // wrap to end
                     g_albumPlaybackIndex = g_shuffleQueue[g_shufflePos];
-                } else {
-                    g_albumPlaybackIndex--;
-                    if (g_albumPlaybackIndex < 0) g_albumPlaybackIndex = (int)g_albumSongOffsets.size() - 1;
                 }
             } else {
                 g_albumPlaybackIndex--;
