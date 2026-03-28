@@ -33,9 +33,12 @@
 #define CONFIG_FILE     "/config.txt"
 #define ALBUM_INDEX_FILE "/albums.idx"
 #define ALBUM_RAW_FILE   "/albums_raw.tmp"
+#define SEARCH_INDEX_FILE "/search.idx"
 
 struct TagInfo {
     String album;
+    String artist;
+    String title;
     uint8_t trackNo;
 };
 
@@ -438,7 +441,7 @@ String getAlbumSongTrackStr(int songIdx) {
 // ==========================================
 
 bool readTagInfo(const char* filepath, TagInfo& out) {
-    out.album = "";
+    out.album = ""; out.artist = ""; out.title = "";
     out.trackNo = 0;
     File f = SD.open(filepath);
     if (!f) return false;
@@ -463,15 +466,14 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
                 char frameId[5] = { (char)fhdr[0], (char)fhdr[1], (char)fhdr[2], (char)fhdr[3], 0 };
                 uint32_t frameSize = ((uint32_t)fhdr[4] << 24) | ((uint32_t)fhdr[5] << 16) | ((uint32_t)fhdr[6] << 8) | fhdr[7];
                 if (frameSize == 0 || frameSize > 10000) break;
-                if (strcmp(frameId, "TALB") == 0 || strcmp(frameId, "TRCK") == 0) {
+                if (strcmp(frameId, "TALB") == 0 || strcmp(frameId, "TRCK") == 0 ||
+                    strcmp(frameId, "TPE1") == 0 || strcmp(frameId, "TPE2") == 0 || strcmp(frameId, "TIT2") == 0) {
                     uint8_t enc; f.read(&enc, 1);
                     char buf[128]; memset(buf, 0, sizeof(buf));
                     int toRead = min((uint32_t)(frameSize - 1), (uint32_t)127);
                     f.read((uint8_t*)buf, toRead);
-                    // Handle UTF-16 BOM: convert to ASCII
                     String val;
                     if (enc == 1 || enc == 2) {
-                        // UTF-16 with BOM
                         int start = 0;
                         if (toRead >= 2 && ((uint8_t)buf[0] == 0xFF || (uint8_t)buf[0] == 0xFE)) start = 2;
                         for (int i = start; i < toRead - 1; i += 2) {
@@ -483,25 +485,27 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
                     }
                     val.trim();
                     if (strcmp(frameId, "TALB") == 0) out.album = val;
-                    else {
+                    else if (strcmp(frameId, "TIT2") == 0) out.title = val;
+                    else if (strcmp(frameId, "TPE1") == 0 || strcmp(frameId, "TPE2") == 0) { if (out.artist.length() == 0) out.artist = val; }
+                    else if (strcmp(frameId, "TRCK") == 0) {
                         int slashPos = val.indexOf('/');
                         if (slashPos > 0) val = val.substring(0, slashPos);
                         out.trackNo = (uint8_t)val.toInt();
                     }
                 }
                 pos += 10 + frameSize;
-                if (out.album.length() > 0 && out.trackNo > 0) break;
+                if (out.album.length() > 0 && out.trackNo > 0 && out.artist.length() > 0 && out.title.length() > 0) break;
             }
         }
-        // ID3v1 fallback if album still empty
-        if (out.album.length() == 0 && fsize > 128) {
+        // ID3v1 fallback for missing fields
+        if ((out.album.length() == 0 || out.title.length() == 0 || out.artist.length() == 0) && fsize > 128) {
             f.seek(fsize - 128);
             uint8_t tag[128]; f.read(tag, 128);
             if (tag[0] == 'T' && tag[1] == 'A' && tag[2] == 'G') {
-                char albBuf[31]; memset(albBuf, 0, 31); memcpy(albBuf, tag + 63, 30);
-                String alb = String(albBuf); alb.trim();
-                if (alb.length() > 0) out.album = alb;
-                // ID3v1.1 track number
+                char buf31[31]; memset(buf31, 0, 31);
+                if (out.title.length() == 0) { memcpy(buf31, tag + 3, 30); String t = String(buf31); t.trim(); if (t.length() > 0) out.title = t; }
+                if (out.artist.length() == 0) { memset(buf31, 0, 31); memcpy(buf31, tag + 33, 30); String a = String(buf31); a.trim(); if (a.length() > 0) out.artist = a; }
+                if (out.album.length() == 0) { memset(buf31, 0, 31); memcpy(buf31, tag + 63, 30); String al = String(buf31); al.trim(); if (al.length() > 0) out.album = al; }
                 if (tag[125] == 0 && tag[126] != 0 && out.trackNo == 0)
                     out.trackNo = tag[126];
             }
@@ -536,12 +540,11 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
                     f.read((uint8_t*)cbuf, cLen);
                     String comment = String(cbuf);
                     String commentUpper = comment; commentUpper.toUpperCase();
-                    if (commentUpper.startsWith("ALBUM=")) {
-                        out.album = comment.substring(6); out.album.trim();
-                    } else if (commentUpper.startsWith("TRACKNUMBER=")) {
-                        out.trackNo = (uint8_t)comment.substring(12).toInt();
-                    }
-                    if (out.album.length() > 0 && out.trackNo > 0) break;
+                    if (commentUpper.startsWith("ALBUM=")) { out.album = comment.substring(6); out.album.trim(); }
+                    else if (commentUpper.startsWith("ARTIST=")) { out.artist = comment.substring(7); out.artist.trim(); }
+                    else if (commentUpper.startsWith("TITLE=")) { out.title = comment.substring(6); out.title.trim(); }
+                    else if (commentUpper.startsWith("TRACKNUMBER=")) { out.trackNo = (uint8_t)comment.substring(12).toInt(); }
+                    if (out.album.length() > 0 && out.trackNo > 0 && out.artist.length() > 0 && out.title.length() > 0) break;
                 }
                 break; // done with vorbis comment block
             } else {
@@ -571,15 +574,20 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
                 pos += skip;
                 continue;
             }
-            // Check for album atom: \xA9alb
-            if (buf[4] == 0xA9 && buf[5] == 'a' && buf[6] == 'l' && buf[7] == 'b') {
-                // Inside: data atom at pos+8
-                if (pos + atomSize <= searchLimit && atomSize > 24) {
-                    f.seek(pos + 24); // skip atom header + data atom header (8+8+8)
+            // Check for text atoms: \xA9alb (album), \xA9ART (artist), \xA9nam (title)
+            if (buf[4] == 0xA9 && pos + atomSize <= searchLimit && atomSize > 24) {
+                bool isAlbum = (buf[5] == 'a' && buf[6] == 'l' && buf[7] == 'b');
+                bool isArtist = (buf[5] == 'A' && buf[6] == 'R' && buf[7] == 'T');
+                bool isTitle = (buf[5] == 'n' && buf[6] == 'a' && buf[7] == 'm');
+                if (isAlbum || isArtist || isTitle) {
+                    f.seek(pos + 24);
                     int dataLen = min((uint32_t)(atomSize - 24), (uint32_t)127);
                     char dbuf[128]; memset(dbuf, 0, 128);
                     f.read((uint8_t*)dbuf, dataLen);
-                    out.album = String(dbuf); out.album.trim();
+                    String val = String(dbuf); val.trim();
+                    if (isAlbum) out.album = val;
+                    else if (isArtist) out.artist = val;
+                    else if (isTitle) out.title = val;
                 }
                 pos += atomSize; continue;
             }
@@ -587,12 +595,11 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
             if (strcmp(atomType, "trkn") == 0 && atomSize > 24) {
                 f.seek(pos + 24);
                 uint8_t trkData[4]; f.read(trkData, 4);
-                // trkn data is big-endian: [0][0][track_hi][track_lo]...
                 out.trackNo = (uint8_t)((trkData[2] << 8) | trkData[3]);
                 pos += atomSize; continue;
             }
             pos += atomSize;
-            if (out.album.length() > 0 && out.trackNo > 0) break;
+            if (out.album.length() > 0 && out.trackNo > 0 && out.artist.length() > 0 && out.title.length() > 0) break;
         }
         f.close(); return true;
     }
@@ -628,7 +635,7 @@ public:
     String currentArtist = "";
     String currentAlbum = "";
 
-    void listDir(fs::FS &fs, const char *dirname, uint8_t levels, File &playlistFile, File *rawAlbumFile = nullptr) {
+    void listDir(fs::FS &fs, const char *dirname, uint8_t levels, File &playlistFile, File *rawAlbumFile = nullptr, File *searchIdxFile = nullptr) {
         File root = fs.open(dirname); if (!root || !root.isDirectory()) return;
         File f = root.openNextFile();
         while (f) {
@@ -637,20 +644,29 @@ public:
                 f = root.openNextFile();
                 continue;
             }
-            if (f.isDirectory()) { if (levels) listDir(fs, f.path(), levels - 1, playlistFile, rawAlbumFile); }
+            if (f.isDirectory()) { if (levels) listDir(fs, f.path(), levels - 1, playlistFile, rawAlbumFile, searchIdxFile); }
             else {
                 String filename = f.name(); String filepath = f.path();
                 String filenameLower = filename; filenameLower.toLowerCase();
                 if (filenameLower.endsWith(".mp3") || filenameLower.endsWith(".flac") || filenameLower.endsWith(".m4a") || filenameLower.endsWith(".aac") || filenameLower.endsWith(".wav")) {
                     playlistFile.println(filepath);
-                    if (rawAlbumFile) {
+                    if (rawAlbumFile || searchIdxFile) {
                         TagInfo tag;
                         readTagInfo(filepath.c_str(), tag);
-                        String albumName = tag.album.length() > 0 ? tag.album : "[No Album]";
-                        albumName.replace("\t", " ");
-                        rawAlbumFile->print(albumName); rawAlbumFile->print("\t");
-                        rawAlbumFile->print(tag.trackNo); rawAlbumFile->print("\t");
-                        rawAlbumFile->println(filepath);
+                        if (rawAlbumFile) {
+                            String albumName = tag.album.length() > 0 ? tag.album : "[No Album]";
+                            albumName.replace("\t", " ");
+                            rawAlbumFile->print(albumName); rawAlbumFile->print("\t");
+                            rawAlbumFile->print(tag.trackNo); rawAlbumFile->print("\t");
+                            rawAlbumFile->println(filepath);
+                        }
+                        if (searchIdxFile) {
+                            // Format: filepath\tartist\ttitle\talbum (one line per song)
+                            searchIdxFile->print(filepath); searchIdxFile->print("\t");
+                            searchIdxFile->print(tag.artist); searchIdxFile->print("\t");
+                            searchIdxFile->print(tag.title); searchIdxFile->print("\t");
+                            searchIdxFile->println(tag.album);
+                        }
                     }
                     M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
                     M5Cardputer.Display.println("Scanning..."); M5Cardputer.Display.setTextColor(C_ACCENT);
@@ -749,13 +765,18 @@ public:
         M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40); M5Cardputer.Display.println("Scanning SD Card...");
         if (SD.exists(PLAYLIST_FILE)) SD.remove(PLAYLIST_FILE);
         if (SD.exists(ALBUM_RAW_FILE)) SD.remove(ALBUM_RAW_FILE);
+        if (SD.exists(SEARCH_INDEX_FILE)) SD.remove(SEARCH_INDEX_FILE);
         File playlistFile = SD.open(PLAYLIST_FILE, FILE_WRITE);
         File rawAlbumFile = SD.open(ALBUM_RAW_FILE, FILE_WRITE);
+        File searchIdxFile = SD.open(SEARCH_INDEX_FILE, FILE_WRITE);
         if (playlistFile) {
-            listDir(SD, "/", 3, playlistFile, rawAlbumFile ? &rawAlbumFile : nullptr);
+            listDir(SD, "/", 3, playlistFile,
+                    rawAlbumFile ? &rawAlbumFile : nullptr,
+                    searchIdxFile ? &searchIdxFile : nullptr);
             playlistFile.close();
         }
         if (rawAlbumFile) rawAlbumFile.close();
+        if (searchIdxFile) searchIdxFile.close();
         buildAlbumIndex();
         loadPlaylist();
     }
@@ -926,8 +947,8 @@ public:
     // SEARCH UI
     // -----------------------------------------------
     // Multi-token search: "li fa" matches "Linkin Park - Faint"
-    // Each space-separated token must appear somewhere in the filename.
-    static bool matchAllTokens(const String& fname, const String& queryLower) {
+    // Each space-separated token must appear somewhere in the text.
+    static bool matchAllTokens(const String& text, const String& queryLower) {
         String remaining = queryLower;
         remaining.trim();
         while (remaining.length() > 0) {
@@ -936,7 +957,7 @@ public:
             if (sp >= 0) { token = remaining.substring(0, sp); remaining = remaining.substring(sp + 1); remaining.trim(); }
             else { token = remaining; remaining = ""; }
             if (token.length() == 0) continue;
-            if (fname.indexOf(token) < 0) return false;
+            if (text.indexOf(token) < 0) return false;
         }
         return true;
     }
@@ -947,13 +968,17 @@ public:
         g_searchScrollOffset = 0;
         if (g_searchQuery.length() == 0) return;
         String queryLower = g_searchQuery; queryLower.toLowerCase();
-        File f = SD.open(PLAYLIST_FILE);
+
+        // Use search index (filepath + artist + title + album) if available
+        bool useIndex = SD.exists(SEARCH_INDEX_FILE);
+        File f = SD.open(useIndex ? SEARCH_INDEX_FILE : PLAYLIST_FILE);
         if (!f) return;
         int idx = 0;
         while (f.available()) {
             String line = f.readStringUntil('\n'); line.trim();
             String lineLower = line; lineLower.toLowerCase();
-            // Match against full path (includes folder names and filename)
+            // Replace tabs with spaces so all fields are searchable as one string
+            lineLower.replace("\t", " ");
             if (matchAllTokens(lineLower, queryLower)) {
                 g_searchResults.push_back(idx);
             }
