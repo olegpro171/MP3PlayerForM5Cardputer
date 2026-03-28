@@ -223,6 +223,9 @@ void fisherYatesShuffle(std::vector<int>& v, int startVal) {
     }
 }
 
+// Forward declaration for findSongInPlaylist (defined after AudioEngine)
+int findSongInPlaylist(const String& targetPath);
+
 // Build shuffle queue for the current mode.
 // globalSongCount: pass audioApp.songOffsets.size() for SHUF_GLOBAL
 void buildShuffleQueue(ShuffleMode mode, int currentVal, int globalSongCount = 0) {
