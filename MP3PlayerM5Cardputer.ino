@@ -84,6 +84,7 @@ void applyTheme(int index) {
 }
 
 enum LoopState { NO_LOOP, LOOP_ALL, LOOP_ONE };
+enum ShuffleMode { SHUF_OFF, SHUF_ALBUM, SHUF_ARTIST, SHUF_GLOBAL };
 enum UIState { UI_PLAYER, UI_SETTINGS, UI_HELP, UI_WIFI_SCAN, UI_TEXT_INPUT, UI_SEARCH, UI_ALBUM_SONGS, UI_TRACK_INFO };
 
 const uint32_t sampleRateValues[] = { 44100, 48000, 88200, 96000, 128000 };
@@ -98,7 +99,8 @@ const char* helpLines[] = {
   "[ / ] : Volume - / +",
   "N / B : Next / Prev Song",
   "/ / , : Seek +Xs / -Xs",
-  "S: Search  F: Shuffle",
+  "S: Search",
+  "F: Shuffle (SA/SR/SG)",
   "L: Loop (1x/LP/1T)",
   "E: Expand  Q: Collapse all",
   "Esc / ` : Settings",
@@ -125,7 +127,7 @@ const char* helpLines[] = {
   "GH: github.com/sanchitminda",
   "Share your suggestions!"
 };
-const int numHelpLines = 32;
+const int numHelpLines = 33;
 const int numSettings = 16;
 
 // ==========================================
@@ -200,57 +202,64 @@ int g_currentAlbumIdx = -1;                 // album index currently loaded in g
 bool g_albumPlaybackActive = false;         // true when playing within an album
 int g_albumPlaybackIndex = 0;               // index into g_albumSongOffsets for current track
 
-// Shuffle queues — prevent repeats by playing all tracks before reshuffling
-std::vector<int> g_albumShuffleQueue;       // permutation of album track indices
-int g_albumShufflePos = 0;                  // current position in album shuffle queue
+// Shuffle queue — shared by all shuffle modes (album/artist/global)
+// Contents depend on mode:
+//   SHUF_ALBUM: indices into g_albumSongOffsets (0..albumSize-1)
+//   SHUF_ARTIST/SHUF_GLOBAL: global songOffsets indices
+std::vector<int> g_shuffleQueue;
+int g_shufflePos = 0;
 
-#define SHUFFLE_HISTORY_SIZE 20
-int g_shuffleHistory[SHUFFLE_HISTORY_SIZE]; // ring buffer of recently played global indices
-int g_shuffleHistoryLen = 0;
-
-// Build a shuffled queue of 0..N-1 using Fisher-Yates, placing startIdx at position 0
-void buildAlbumShuffleQueue(int count, int startIdx) {
-    g_albumShuffleQueue.clear();
-    for (int i = 0; i < count; i++) g_albumShuffleQueue.push_back(i);
-    // Fisher-Yates shuffle
-    for (int i = count - 1; i > 0; i--) {
+// Fisher-Yates shuffle a vector in-place, placing startVal at position 0
+void fisherYatesShuffle(std::vector<int>& v, int startVal) {
+    int n = v.size();
+    for (int i = n - 1; i > 0; i--) {
         int j = random(0, i + 1);
-        int tmp = g_albumShuffleQueue[i]; g_albumShuffleQueue[i] = g_albumShuffleQueue[j]; g_albumShuffleQueue[j] = tmp;
+        int tmp = v[i]; v[i] = v[j]; v[j] = tmp;
     }
-    // Move startIdx to position 0 so current song is first
-    if (startIdx >= 0 && startIdx < count) {
-        for (int i = 0; i < count; i++) {
-            if (g_albumShuffleQueue[i] == startIdx) {
-                int tmp = g_albumShuffleQueue[0]; g_albumShuffleQueue[0] = g_albumShuffleQueue[i]; g_albumShuffleQueue[i] = tmp;
-                break;
-            }
+    if (startVal >= 0) {
+        for (int i = 0; i < n; i++) {
+            if (v[i] == startVal) { int tmp = v[0]; v[0] = v[i]; v[i] = tmp; break; }
         }
     }
-    g_albumShufflePos = 0;
 }
 
-// Pick a random global index that isn't in recent history
-int pickGlobalShuffle(int total) {
-    int pick;
-    int attempts = 0;
-    do {
-        pick = random(0, total);
-        bool inHistory = false;
-        for (int i = 0; i < g_shuffleHistoryLen; i++) {
-            if (g_shuffleHistory[i] == pick) { inHistory = true; break; }
+// Build shuffle queue for the current mode.
+// globalSongCount: pass audioApp.songOffsets.size() for SHUF_GLOBAL
+void buildShuffleQueue(ShuffleMode mode, int currentVal, int globalSongCount = 0) {
+    g_shuffleQueue.clear();
+    g_shufflePos = 0;
+    if (mode == SHUF_ALBUM) {
+        for (int i = 0; i < (int)g_albumSongOffsets.size(); i++) g_shuffleQueue.push_back(i);
+    } else if (mode == SHUF_ARTIST) {
+        // Collect global indices of all songs by the current artist (across all their albums)
+        int artistIdx = -1;
+        if (g_currentAlbumIdx >= 0 && g_currentAlbumIdx < (int)g_albumArtistMap.size())
+            artistIdx = g_albumArtistMap[g_currentAlbumIdx];
+        if (artistIdx >= 0) {
+            for (int alb = 0; alb < (int)g_albumOffsets.size(); alb++) {
+                if (g_albumArtistMap[alb] != artistIdx) continue;
+                File f = SD.open(ALBUM_INDEX_FILE);
+                if (!f) continue;
+                f.seek(g_albumOffsets[alb]);
+                f.readStringUntil('\n'); // skip @AlbumName
+                while (f.available()) {
+                    String line = f.readStringUntil('\n'); line.trim();
+                    if (line.startsWith("@") || line.startsWith("#")) break;
+                    int pipePos = line.indexOf('|');
+                    if (pipePos >= 0) {
+                        String songPath = line.substring(pipePos + 1); songPath.trim();
+                        if (songPath.length() > 0 && !songPath.startsWith("/")) songPath = "/" + songPath;
+                        int gIdx = findSongInPlaylist(songPath);
+                        if (gIdx >= 0) g_shuffleQueue.push_back(gIdx);
+                    }
+                }
+                f.close();
+            }
         }
-        if (!inHistory || attempts > 50) break; // safety: don't loop forever
-        attempts++;
-    } while (true);
-    // Add to history ring buffer
-    if (g_shuffleHistoryLen < SHUFFLE_HISTORY_SIZE) {
-        g_shuffleHistory[g_shuffleHistoryLen++] = pick;
-    } else {
-        // Shift left, add at end
-        for (int i = 0; i < SHUFFLE_HISTORY_SIZE - 1; i++) g_shuffleHistory[i] = g_shuffleHistory[i+1];
-        g_shuffleHistory[SHUFFLE_HISTORY_SIZE - 1] = pick;
+    } else if (mode == SHUF_GLOBAL) {
+        for (int i = 0; i < globalSongCount; i++) g_shuffleQueue.push_back(i);
     }
-    return pick;
+    fisherYatesShuffle(g_shuffleQueue, currentVal);
 }
 
 // ==========================================
@@ -850,7 +859,7 @@ public:
     int currentIndex = 0;
     int browserIndex = 0;
     bool isPaused = false;
-    bool isShuffle = false;
+    ShuffleMode shuffleMode = SHUF_OFF;
     LoopState loopMode = NO_LOOP;
     uint32_t paused_at = 0;
     uint32_t pausedSize = 0;
@@ -1135,14 +1144,25 @@ public:
         if (songOffsets.empty()) return;
         if (autoPlay && loopMode == LOOP_ONE) { play(currentIndex); return; }
 
-        // Album-scoped playback
+        // Artist/Global shuffle: use shared queue with global indices
+        if (shuffleMode == SHUF_ARTIST || shuffleMode == SHUF_GLOBAL) {
+            if (g_shuffleQueue.empty()) buildShuffleQueue(shuffleMode, currentIndex, songOffsets.size());
+            g_shufflePos++;
+            if (g_shufflePos >= (int)g_shuffleQueue.size()) {
+                if (loopMode == LOOP_ALL) { buildShuffleQueue(shuffleMode, -1, songOffsets.size()); g_shufflePos = 0; }
+                else { stop(); return; }
+            }
+            play(g_shuffleQueue[g_shufflePos]);
+            return;
+        }
+
+        // Album-scoped playback (sequential or album shuffle)
         if (g_albumPlaybackActive && g_albumSongOffsets.size() > 0) {
-            if (isShuffle) {
-                // Advance in shuffle queue
-                if (g_albumShuffleQueue.empty()) buildAlbumShuffleQueue(g_albumSongOffsets.size(), g_albumPlaybackIndex);
-                g_albumShufflePos++;
-                if (g_albumShufflePos >= (int)g_albumShuffleQueue.size()) {
-                    if (loopMode == LOOP_ALL) { buildAlbumShuffleQueue(g_albumSongOffsets.size(), -1); g_albumShufflePos = 0; }
+            if (shuffleMode == SHUF_ALBUM) {
+                if (g_shuffleQueue.empty()) buildShuffleQueue(SHUF_ALBUM, g_albumPlaybackIndex);
+                g_shufflePos++;
+                if (g_shufflePos >= (int)g_shuffleQueue.size()) {
+                    if (loopMode == LOOP_ALL) { buildShuffleQueue(SHUF_ALBUM, -1); g_shufflePos = 0; }
                     else {
                         g_albumPlaybackIndex = 0; userSettings.lastAlbumTrack = 0;
                         String firstPath = getAlbumSongPath(0);
@@ -1152,7 +1172,7 @@ public:
                         return;
                     }
                 }
-                g_albumPlaybackIndex = g_albumShuffleQueue[g_albumShufflePos];
+                g_albumPlaybackIndex = g_shuffleQueue[g_shufflePos];
             } else {
                 g_albumPlaybackIndex++;
                 if (g_albumPlaybackIndex >= (int)g_albumSongOffsets.size()) {
@@ -1174,24 +1194,33 @@ public:
             return;
         }
 
-        if (isShuffle) currentIndex = pickGlobalShuffle(songOffsets.size());
-        else {
-            currentIndex++;
-            if ((size_t)currentIndex >= songOffsets.size()) { if (loopMode == LOOP_ALL) currentIndex = 0; else { stop(); currentIndex = 0; return; } }
-        }
+        // Global sequential (no album context, no shuffle)
+        currentIndex++;
+        if ((size_t)currentIndex >= songOffsets.size()) { if (loopMode == LOOP_ALL) currentIndex = 0; else { stop(); currentIndex = 0; return; } }
         play(currentIndex);
     }
 
     void prev() {
         if (songOffsets.empty()) return;
 
+        // Artist/Global shuffle: go back in shared queue
+        if (shuffleMode == SHUF_ARTIST || shuffleMode == SHUF_GLOBAL) {
+            if (g_shuffleQueue.size() > 0 && g_shufflePos > 0) {
+                g_shufflePos--;
+                play(g_shuffleQueue[g_shufflePos]);
+            } else {
+                currentIndex--; if (currentIndex < 0) currentIndex = songOffsets.size() - 1;
+                play(currentIndex);
+            }
+            return;
+        }
+
         // Album-scoped playback
         if (g_albumPlaybackActive && g_albumSongOffsets.size() > 0) {
-            if (isShuffle) {
-                // Go back in shuffle queue
-                if (g_albumShuffleQueue.size() > 0 && g_albumShufflePos > 0) {
-                    g_albumShufflePos--;
-                    g_albumPlaybackIndex = g_albumShuffleQueue[g_albumShufflePos];
+            if (shuffleMode == SHUF_ALBUM) {
+                if (g_shuffleQueue.size() > 0 && g_shufflePos > 0) {
+                    g_shufflePos--;
+                    g_albumPlaybackIndex = g_shuffleQueue[g_shufflePos];
                 } else {
                     g_albumPlaybackIndex--;
                     if (g_albumPlaybackIndex < 0) g_albumPlaybackIndex = (int)g_albumSongOffsets.size() - 1;
@@ -1207,8 +1236,8 @@ public:
             return;
         }
 
-        if (isShuffle) currentIndex = pickGlobalShuffle(songOffsets.size());
-        else { currentIndex--; if (currentIndex < 0) currentIndex = songOffsets.size() - 1; }
+        // Global sequential
+        currentIndex--; if (currentIndex < 0) currentIndex = songOffsets.size() - 1;
         play(currentIndex);
     }
 
@@ -1737,7 +1766,12 @@ public:
         M5Cardputer.Display.setCursor(xStart + 5, yStart); M5Cardputer.Display.print(audioApp.isPaused ? "[PAUSED]" : "PLAYING >");
 
         M5Cardputer.Display.setCursor(M5Cardputer.Display.width() - 55, yStart);
-        if (audioApp.isShuffle) { M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("SHF "); } else { M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("___ "); }
+        switch(audioApp.shuffleMode) {
+            case SHUF_OFF: M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("___ "); break;
+            case SHUF_ALBUM: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("SA "); break;
+            case SHUF_ARTIST: M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("SR "); break;
+            case SHUF_GLOBAL: M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("SG "); break;
+        }
 
         switch(audioApp.loopMode) {
             case NO_LOOP: M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("1x"); break;
@@ -3077,15 +3111,13 @@ void loop() {
                     currentState = UI_SEARCH; UIManager::drawSearch();
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed('f')) {
-                    audioApp.isShuffle = !audioApp.isShuffle;
-                    if (audioApp.isShuffle) {
-                        // Build shuffle queue for current context
-                        if (g_albumPlaybackActive && g_albumSongOffsets.size() > 0)
-                            buildAlbumShuffleQueue(g_albumSongOffsets.size(), g_albumPlaybackIndex);
-                        g_shuffleHistoryLen = 0; // clear global history
+                    // Cycle: OFF -> ALBUM -> ARTIST -> GLOBAL -> OFF
+                    audioApp.shuffleMode = (ShuffleMode)((audioApp.shuffleMode + 1) % 4);
+                    if (audioApp.shuffleMode != SHUF_OFF) {
+                        int curVal = (audioApp.shuffleMode == SHUF_ALBUM) ? g_albumPlaybackIndex : audioApp.currentIndex;
+                        buildShuffleQueue(audioApp.shuffleMode, curVal, audioApp.songOffsets.size());
                     } else {
-                        g_albumShuffleQueue.clear(); g_albumShufflePos = 0;
-                        g_shuffleHistoryLen = 0;
+                        g_shuffleQueue.clear(); g_shufflePos = 0;
                     }
                     UIManager::drawNowPlaying();
                 }
@@ -3296,7 +3328,7 @@ void loop() {
                             audioApp.play(globalIdx);
                             g_albumPlaybackActive = true;
                             g_albumPlaybackIndex = g_albumSongCursor;
-                            if (audioApp.isShuffle) buildAlbumShuffleQueue(g_albumSongOffsets.size(), g_albumPlaybackIndex);
+                            if (audioApp.shuffleMode == SHUF_ALBUM) buildShuffleQueue(SHUF_ALBUM, g_albumPlaybackIndex);
                             userSettings.lastAlbumIdx = g_currentAlbumIdx;
                             userSettings.lastAlbumTrack = g_albumPlaybackIndex;
                             ConfigManager::save(audioApp.id3 ? audioApp.id3->getPos() : 0, audioApp.currentIndex);
