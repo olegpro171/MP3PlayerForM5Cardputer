@@ -117,7 +117,7 @@ const char* helpLines[] = {
   "Share your suggestions!"
 };
 const int numHelpLines = 28;
-const int numSettings = 16;   // +1 for Playlist Mode
+const int numSettings = 17;
 
 // ==========================================
 // GLOBALS
@@ -141,6 +141,7 @@ struct Settings {
     int seek = 0;
     String currentFolder = "";    // "" = All Music; "/FolderName" = specific folder
     int volume = 128;
+    bool showSplash = true;
 };
 
 Settings userSettings;
@@ -264,6 +265,7 @@ public:
         userSettings.seek = preferences.getInt("seek", 5);
         userSettings.currentFolder = preferences.getString("curFolder", "");
         userSettings.volume = preferences.getInt("volume", 128);
+        userSettings.showSplash = preferences.getBool("showSplash", true);
         preferences.end();
 
         if(userSettings.apSSID.length() == 0) userSettings.apSSID = "Cardputer";
@@ -291,6 +293,7 @@ public:
         preferences.putInt("seek", userSettings.seek);
         preferences.putString("curFolder", userSettings.currentFolder);
         preferences.putInt("volume", userSettings.volume);
+        preferences.putBool("showSplash", userSettings.showSplash);
         preferences.end();
     }
 
@@ -305,7 +308,8 @@ public:
             file.println(userSettings.wifiPass); file.println(userSettings.isAPMode ? 1 : 0);
             file.println(userSettings.apSSID); file.println(userSettings.apPass);
             file.println(userSettings.powerSaverMode); file.println(userSettings.seek);
-            file.println(userSettings.currentFolder); file.println(userSettings.volume); file.close();
+            file.println(userSettings.currentFolder); file.println(userSettings.volume);
+            file.println(userSettings.showSplash ? 1 : 0); file.close();
             
             M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
             M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("Exported to SD!"); delay(1000);
@@ -335,6 +339,7 @@ public:
             if(file.available()) userSettings.seek = file.readStringUntil('\n').toInt();
             if(file.available()) { userSettings.currentFolder = file.readStringUntil('\n'); userSettings.currentFolder.trim(); }
             if(file.available()) userSettings.volume = file.readStringUntil('\n').toInt();
+            if(file.available()) userSettings.showSplash = (file.readStringUntil('\n').toInt() == 1);
             file.close();
             save(); M5Cardputer.Display.setBrightness(userSettings.brightness);
             M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
@@ -1518,6 +1523,7 @@ public:
                     if (flabel.length() > 12) flabel = flabel.substring(0, 12) + "~";
                     M5Cardputer.Display.printf("Playlist: %s", flabel.c_str()); break;
                 }
+                case 16: M5Cardputer.Display.printf("Splash Screen: %s", userSettings.showSplash ? "ON" : "OFF"); break;
             }
         }
     }
@@ -2615,7 +2621,7 @@ void setup() {
     M5Cardputer.Display.setBrightness(userSettings.brightness);
 
     // Show splash screen animation
-    SplashScreen::show();
+    if (userSettings.showSplash) SplashScreen::show();
     
     out = new AudioOutputM5Speaker(&M5Cardputer.Speaker, 0);
     out->begin();
@@ -2755,8 +2761,9 @@ void loop() {
                             break;
                         case 9:
                             userSettings.visMode = (userSettings.visMode + (right?1:-1) + NUM_VIS_MODES) % NUM_VIS_MODES;
-                            UIManager::drawBaseUI(); 
+                            UIManager::drawBaseUI();
                             break;
+                        case 16: userSettings.showSplash = !userSettings.showSplash; break;
                     }
                     UIManager::drawSettings();
                 }
