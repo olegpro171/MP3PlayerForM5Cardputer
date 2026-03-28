@@ -2504,8 +2504,10 @@ void setup() {
     if (nvs_flash_init() != ESP_OK) { nvs_flash_erase(); nvs_flash_init(); }
 
     // Factory reset: hold Button A (G0) during boot to erase all settings
-    M5Cardputer.update();
-    if (M5Cardputer.BtnA.isPressed()) {
+    // Use direct GPIO read — M5 button API may not be ready this early
+    pinMode(0, INPUT_PULLUP);
+    delay(50); // let pin settle
+    if (digitalRead(0) == LOW) {
         nvs_flash_erase(); nvs_flash_init();
         M5Cardputer.Display.setRotation(1);
         M5Cardputer.Display.fillScreen(TFT_BLACK);
