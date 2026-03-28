@@ -50,8 +50,8 @@ uint16_t C_BG_DARK, C_BG_LIGHT, C_HEADER, C_ACCENT, C_PLAYING, C_HIGHLIGHT, C_TE
 
 const int NUM_THEMES = 4;
 const char* themeLabels[] = { "Gunmetal Blue", "Cyberpunk", "Retro Amber", "Hacker Green" };
-const int NUM_VIS_MODES = 4;
-const char* visModeLabels[] = { "Classic Bars", "Waveform Line", "Circular Spikes", "OFF" };
+const int NUM_VIS_MODES = 5;
+const char* visModeLabels[] = { "Classic Bars", "Waveform Line", "Circular Spikes", "Now Playing", "OFF" };
 
 void applyTheme(int index) {
     switch(index) {
@@ -1311,76 +1311,97 @@ public:
         M5Cardputer.Display.fillRect(xStart + 31, volY + 1, (M5Cardputer.Speaker.getVolume() * 58) / 255, 4, C_ACCENT);
     }
 
+    static void drawVisNowPlayingInfo(int textX, int maxChars) {
+        String artist = audioApp.currentArtist.length() > 0 ? audioApp.currentArtist : "Unknown Artist";
+        String album = audioApp.currentAlbum.length() > 0 ? audioApp.currentAlbum : "Unknown Album";
+        visSprite.setFont(&fonts::Font0);
+        visSprite.setTextColor(C_TEXT_MAIN); visSprite.setCursor(textX, 4); visSprite.print(artist.substring(0, maxChars));
+        visSprite.setTextColor(C_TEXT_DIM); visSprite.setCursor(textX, 16); visSprite.print(album.substring(0, maxChars));
+        int elapsedSec = 0, totalSec = 0;
+        if (audioApp.isPaused && audioApp.pausedSize > 0) {
+            elapsedSec = audioApp.paused_at / 16000;
+            totalSec = audioApp.pausedSize / 16000;
+        } else if (audioApp.id3 && audioApp.id3->getSize() > 0) {
+            elapsedSec = audioApp.id3->getPos() / 16000;
+            totalSec = audioApp.id3->getSize() / 16000;
+        }
+        char timeStr[16];
+        sprintf(timeStr, "%02d:%02d/%02d:%02d", elapsedSec / 60, elapsedSec % 60, totalSec / 60, totalSec % 60);
+        visSprite.setTextColor(C_HIGHLIGHT); visSprite.setCursor(textX, 28); visSprite.print(timeStr);
+    }
+
     static void drawVisualizer() {
-        if (!audioApp.decoder || !audioApp.decoder->isRunning() || audioApp.isPaused || !showVisualizer) return;
-        auto buf = out->getBuffer();
-        
-        if (buf) {
-            if (userSettings.visMode == 3) {
-                visSprite.fillScreen(C_BG_DARK);
-                visSprite.fillRoundRect(2, 2, 38, 38, 4, C_BG_LIGHT);
-                visSprite.drawRoundRect(2, 2, 38, 38, 4, C_ACCENT);
-                int cx = 21, cy = 21;
-                int animType = audioApp.currentIndex % 4;
-                switch (animType) {
-                    case 0: {
-                        int r = 16; float angle = millis() / 400.0; 
-                        visSprite.fillCircle(cx, cy, r, C_BG_DARK); visSprite.drawCircle(cx, cy, r, C_TEXT_DIM);
-                        visSprite.drawCircle(cx, cy, r - 4, 0x0000); visSprite.drawCircle(cx, cy, r - 8, 0x0000);
-                        visSprite.fillCircle(cx, cy, 6, C_ACCENT);
-                        visSprite.fillCircle(cx + (cos(angle) * 3), cy + (sin(angle) * 3), 2, C_BG_DARK);
-                        visSprite.fillCircle(cx, cy, 2, C_BG_DARK);
-                        visSprite.drawLine(35, 5, 26, 15, C_TEXT_MAIN); visSprite.fillCircle(35, 5, 3, C_TEXT_DIM); visSprite.fillRect(24, 14, 4, 6, C_HIGHLIGHT);
-                        break;
-                    }
-                    case 1: {
-                        float angle = millis() / 200.0;
-                        visSprite.fillRoundRect(cx - 14, cy - 9, 28, 18, 2, C_TEXT_DIM); visSprite.fillRoundRect(cx - 8, cy - 3, 16, 6, 1, C_BG_DARK);
-                        int lx = cx - 5, ly = cy; visSprite.drawCircle(lx, ly, 3, C_TEXT_MAIN);
-                        visSprite.drawLine(lx - cos(angle)*3, ly - sin(angle)*3, lx + cos(angle)*3, ly + sin(angle)*3, C_TEXT_MAIN);
-                        int rx = cx + 5, ry = cy; visSprite.drawCircle(rx, ry, 3, C_TEXT_MAIN);
-                        visSprite.drawLine(rx - cos(angle)*3, ry - sin(angle)*3, rx + cos(angle)*3, ry + sin(angle)*3, C_TEXT_MAIN);
-                        visSprite.drawLine(cx - 6, cy + 7, cx + 6, cy + 7, C_BG_DARK); visSprite.drawLine(cx - 4, cy + 8, cx + 4, cy + 8, C_BG_DARK);
-                        break;
-                    }
-                    case 2: {
-                        float pulse = sin(millis() / 150.0); int r = 10 + (pulse * 2);
-                        visSprite.fillRect(cx - 12, cy - 15, 24, 30, C_TEXT_DIM); visSprite.drawRect(cx - 12, cy - 15, 24, 30, C_TEXT_MAIN);
-                        visSprite.fillCircle(cx, cy - 8, 4, C_BG_DARK); visSprite.drawCircle(cx, cy - 8, 2, C_BG_LIGHT);
-                        visSprite.fillCircle(cx, cy + 4, 12, C_BG_DARK); visSprite.fillCircle(cx, cy + 4, r, C_TEXT_DIM);
-                        visSprite.fillCircle(cx, cy + 4, r - 3, C_BG_DARK); visSprite.fillCircle(cx, cy + 4, 3, C_ACCENT);
-                        break;
-                    }
-                    case 3: {
-                        int r = 16; float angle = millis() / 300.0;
-                        visSprite.fillCircle(cx, cy, r, C_TEXT_MAIN); visSprite.drawCircle(cx, cy, r, C_TEXT_DIM);
-                        float a2 = angle + PI/4;
-                        visSprite.fillTriangle(cx, cy, cx + cos(angle)*r, cy + sin(angle)*r, cx + cos(a2)*r, cy + sin(a2)*r, C_HIGHLIGHT);
-                        float a3 = angle + PI, a4 = angle + PI + PI/4;
-                        visSprite.fillTriangle(cx, cy, cx + cos(a3)*r, cy + sin(a3)*r, cx + cos(a4)*r, cy + sin(a4)*r, C_ACCENT);
-                        visSprite.fillCircle(cx, cy, 6, C_BG_DARK); visSprite.drawCircle(cx, cy, 6, C_TEXT_DIM); visSprite.fillCircle(cx, cy, 2, C_BG_LIGHT);
-                        break;
-                    }
+        if (!showVisualizer) return;
+        // Info modes (3, 4) render even when paused; audio modes (0-2) need active decoder
+        bool isInfoMode = (userSettings.visMode == 3 || userSettings.visMode == 4);
+        if (!isInfoMode && (!audioApp.decoder || !audioApp.decoder->isRunning() || audioApp.isPaused)) return;
+        if (userSettings.visMode >= NUM_VIS_MODES) return; // OFF
+
+        if (userSettings.visMode == 3) {
+            // Animated art + info text
+            visSprite.fillScreen(C_BG_DARK);
+            visSprite.fillRoundRect(2, 2, 38, 38, 4, C_BG_LIGHT);
+            visSprite.drawRoundRect(2, 2, 38, 38, 4, C_ACCENT);
+            int cx = 21, cy = 21;
+            int animType = audioApp.currentIndex % 4;
+            switch (animType) {
+                case 0: {
+                    int r = 16; float angle = millis() / 400.0;
+                    visSprite.fillCircle(cx, cy, r, C_BG_DARK); visSprite.drawCircle(cx, cy, r, C_TEXT_DIM);
+                    visSprite.drawCircle(cx, cy, r - 4, 0x0000); visSprite.drawCircle(cx, cy, r - 8, 0x0000);
+                    visSprite.fillCircle(cx, cy, 6, C_ACCENT);
+                    visSprite.fillCircle(cx + (cos(angle) * 3), cy + (sin(angle) * 3), 2, C_BG_DARK);
+                    visSprite.fillCircle(cx, cy, 2, C_BG_DARK);
+                    visSprite.drawLine(35, 5, 26, 15, C_TEXT_MAIN); visSprite.fillCircle(35, 5, 3, C_TEXT_DIM); visSprite.fillRect(24, 14, 4, 6, C_HIGHLIGHT);
+                    break;
                 }
-                String artist = audioApp.currentArtist.length() > 0 ? audioApp.currentArtist : "Unknown Artist";
-                String album = audioApp.currentAlbum.length() > 0 ? audioApp.currentAlbum : "Unknown Album";
-                visSprite.setFont(&fonts::Font0);
-                visSprite.setTextColor(C_TEXT_MAIN); visSprite.setCursor(45, 4); visSprite.print(artist.substring(0, 12));
-                visSprite.setTextColor(C_TEXT_DIM); visSprite.setCursor(45, 16); visSprite.print(album.substring(0, 12));
-                int elapsedSec = 0, totalSec = 0;
-                if (audioApp.id3 && audioApp.id3->getSize() > 0) {
-                    elapsedSec = audioApp.id3->getPos() / 16000;
-                    totalSec = audioApp.id3->getSize() / 16000;
+                case 1: {
+                    float angle = millis() / 200.0;
+                    visSprite.fillRoundRect(cx - 14, cy - 9, 28, 18, 2, C_TEXT_DIM); visSprite.fillRoundRect(cx - 8, cy - 3, 16, 6, 1, C_BG_DARK);
+                    int lx = cx - 5, ly = cy; visSprite.drawCircle(lx, ly, 3, C_TEXT_MAIN);
+                    visSprite.drawLine(lx - cos(angle)*3, ly - sin(angle)*3, lx + cos(angle)*3, ly + sin(angle)*3, C_TEXT_MAIN);
+                    int rx = cx + 5, ry = cy; visSprite.drawCircle(rx, ry, 3, C_TEXT_MAIN);
+                    visSprite.drawLine(rx - cos(angle)*3, ry - sin(angle)*3, rx + cos(angle)*3, ry + sin(angle)*3, C_TEXT_MAIN);
+                    visSprite.drawLine(cx - 6, cy + 7, cx + 6, cy + 7, C_BG_DARK); visSprite.drawLine(cx - 4, cy + 8, cx + 4, cy + 8, C_BG_DARK);
+                    break;
                 }
-                char timeStr[16];
-                sprintf(timeStr, "%02d:%02d/%02d:%02d", elapsedSec / 60, elapsedSec % 60, totalSec / 60, totalSec % 60);
-                visSprite.setTextColor(C_HIGHLIGHT); visSprite.setCursor(45, 28); visSprite.print(timeStr);
-                visSprite.pushSprite(PLAYLIST_WIDTH + 2, HEADER_HEIGHT + 55);
-                return;
+                case 2: {
+                    float pulse = sin(millis() / 150.0); int r = 10 + (pulse * 2);
+                    visSprite.fillRect(cx - 12, cy - 15, 24, 30, C_TEXT_DIM); visSprite.drawRect(cx - 12, cy - 15, 24, 30, C_TEXT_MAIN);
+                    visSprite.fillCircle(cx, cy - 8, 4, C_BG_DARK); visSprite.drawCircle(cx, cy - 8, 2, C_BG_LIGHT);
+                    visSprite.fillCircle(cx, cy + 4, 12, C_BG_DARK); visSprite.fillCircle(cx, cy + 4, r, C_TEXT_DIM);
+                    visSprite.fillCircle(cx, cy + 4, r - 3, C_BG_DARK); visSprite.fillCircle(cx, cy + 4, 3, C_ACCENT);
+                    break;
+                }
+                case 3: {
+                    int r = 16; float angle = millis() / 300.0;
+                    visSprite.fillCircle(cx, cy, r, C_TEXT_MAIN); visSprite.drawCircle(cx, cy, r, C_TEXT_DIM);
+                    float a2 = angle + PI/4;
+                    visSprite.fillTriangle(cx, cy, cx + cos(angle)*r, cy + sin(angle)*r, cx + cos(a2)*r, cy + sin(a2)*r, C_HIGHLIGHT);
+                    float a3 = angle + PI, a4 = angle + PI + PI/4;
+                    visSprite.fillTriangle(cx, cy, cx + cos(a3)*r, cy + sin(a3)*r, cx + cos(a4)*r, cy + sin(a4)*r, C_ACCENT);
+                    visSprite.fillCircle(cx, cy, 6, C_BG_DARK); visSprite.drawCircle(cx, cy, 6, C_TEXT_DIM); visSprite.fillCircle(cx, cy, 2, C_BG_LIGHT);
+                    break;
+                }
             }
-            memcpy(raw_data, buf, WAVE_SIZE * 2 * sizeof(int16_t)); 
-            fft.exec(raw_data); 
-            visSprite.fillScreen(C_BG_DARK); 
+            drawVisNowPlayingInfo(45, 12);
+            visSprite.pushSprite(PLAYLIST_WIDTH + 2, HEADER_HEIGHT + 55);
+            return;
+        }
+
+        if (userSettings.visMode == 4) {
+            // Text-only info — no animation, full width for text
+            visSprite.fillScreen(C_BG_DARK);
+            drawVisNowPlayingInfo(4, 18);
+            visSprite.pushSprite(PLAYLIST_WIDTH + 2, HEADER_HEIGHT + 55);
+            return;
+        }
+
+        auto buf = out->getBuffer();
+        if (buf) {
+            memcpy(raw_data, buf, WAVE_SIZE * 2 * sizeof(int16_t));
+            fft.exec(raw_data);
+            visSprite.fillScreen(C_BG_DARK);
             int visW = visSprite.width(), visH = visSprite.height();
 
             if (userSettings.visMode == 0) {
@@ -1389,7 +1410,7 @@ public:
                     uint16_t color = barH < visH * 0.4 ? C_ACCENT : (barH < visH * 0.7 ? C_HIGHLIGHT : TFT_RED);
                     visSprite.fillRect(bx * 4, visH - barH, 3, barH, color);
                 }
-            } 
+            }
             else if (userSettings.visMode == 1) {
                 int prevX = 0, prevY = visH;
                 int numPoints = min((int)visW, FFT_SIZE / 2);
