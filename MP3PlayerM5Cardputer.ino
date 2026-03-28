@@ -1018,11 +1018,13 @@ public:
     }
 
     // Elapsed seconds: duration * (currentPos / totalSize)
+    // Subtract buffer size (16KB) since the buffer pre-reads ahead of actual playback
     int getElapsedSec() {
         if (currentDuration == 0) return 0;
         uint32_t pos = isPaused ? paused_at : (id3 ? id3->getPos() : 0);
         uint32_t size = isPaused ? pausedSize : (id3 ? id3->getSize() : 0);
         if (size == 0) return 0;
+        if (!isPaused && pos > 16384) pos -= 16384;
         return (int)((uint64_t)currentDuration * pos / size);
     }
 
