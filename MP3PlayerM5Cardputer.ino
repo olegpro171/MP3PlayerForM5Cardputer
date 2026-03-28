@@ -239,20 +239,33 @@ const char* mapRussian(char c) {
         "\xd1\x84", "\xd0\xb8", "\xd1\x81", "\xd0\xb2", "\xd1\x83", // a-e: ф и с в у
         "\xd0\xb0", "\xd0\xbf", "\xd1\x80", "\xd1\x88", "\xd0\xbe", // f-j: а п р ш о
         "\xd0\xbb", "\xd0\xb4", "\xd1\x8c", "\xd1\x82", "\xd1\x89", // k-o: л д ь т щ
-        "\xd0\xb7", "\xd0\xb9", "\xd0\xba", "\xd0\xb5", "\xd0\xbd", // p-t: з й к е н
-        "\xd0\xb3", "\xd0\xbc", "\xd1\x86", "\xd1\x87", "\xd1\x85", // u-y: г м ц ч х
+        "\xd0\xb7", "\xd0\xb9", "\xd0\xba", "\xd1\x8b", "\xd0\xb5", // p-t: з й к ы е
+        "\xd0\xb3", "\xd0\xbc", "\xd1\x86", "\xd1\x87", "\xd0\xbd", // u-y: г м ц ч н
         "\xd1\x8f"                                                     // z:   я
     };
     static const char* upper[26] = {
         "\xd0\xa4", "\xd0\x98", "\xd0\xa1", "\xd0\x92", "\xd0\xa3", // A-E: Ф И С В У
         "\xd0\x90", "\xd0\x9f", "\xd0\xa0", "\xd0\xa8", "\xd0\x9e", // F-J: А П Р Ш О
         "\xd0\x9b", "\xd0\x94", "\xd0\xac", "\xd0\xa2", "\xd0\xa9", // K-O: Л Д Ь Т Щ
-        "\xd0\x97", "\xd0\x99", "\xd0\x9a", "\xd0\x95", "\xd0\x9d", // P-T: З Й К Е Н
-        "\xd0\x93", "\xd0\x9c", "\xd0\xa6", "\xd0\xa7", "\xd0\xa5", // U-Y: Г М Ц Ч Х
+        "\xd0\x97", "\xd0\x99", "\xd0\x9a", "\xd0\xab", "\xd0\x95", // P-T: З Й К Ы Е
+        "\xd0\x93", "\xd0\x9c", "\xd0\xa6", "\xd0\xa7", "\xd0\x9d", // U-Y: Г М Ц Ч Н
         "\xd0\xaf"                                                     // Z:   Я
     };
     if (c >= 'a' && c <= 'z') return lower[c - 'a'];
     if (c >= 'A' && c <= 'Z') return upper[c - 'A'];
+
+    // Extra mappings for the 7 Cyrillic letters without Latin equivalents
+    switch (c) {
+        case '[':  return "\xd1\x85"; // х
+        case '{':  return "\xd0\xa5"; // Х
+        case ']':  return "\xd1\x8a"; // ъ
+        case '}':  return "\xd0\xaa"; // Ъ
+        case ':':  return "\xd0\xb6"; // ж
+        case '\'': return "\xd1\x8d"; // э
+        case '"':  return "\xd0\xad"; // Э
+        case ',':  return "\xd0\xb1"; // б
+        case '>':  return "\xd1\x8e"; // ю
+    }
     return nullptr;
 }
 
@@ -302,6 +315,7 @@ String utf8ToLower(const String& s) {
 }
 
 #define PLAYLIST_WIDTH 120
+#define NOW_PLAYING_PADDING_LEFT 3
 #define ROW_HEIGHT 15
 #define HEADER_HEIGHT 20
 #define BOTTOM_BAR_HEIGHT 18
@@ -1715,7 +1729,7 @@ public:
         M5Cardputer.Display.fillRect(2, boxY, M5Cardputer.Display.width() - 4, 16, C_BG_LIGHT);
         M5Cardputer.Display.drawRect(2, boxY, M5Cardputer.Display.width() - 4, 16, C_ACCENT);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
-        M5Cardputer.Display.setCursor(6, boxY + 4);
+        M5Cardputer.Display.setCursor(6, boxY + 2);
         String displayQuery = g_searchQuery.length() > 0 ? g_searchQuery : "";
         M5Cardputer.Display.print(displayQuery + "_");
 
@@ -2098,10 +2112,11 @@ public:
     // Full redraw of the now-playing area — called on state changes (play, pause, next, etc.)
     static void drawNowPlaying() {
         int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 5;
+
         M5Cardputer.Display.fillRect(xStart, yStart, M5Cardputer.Display.width() - xStart, 50, C_BG_DARK);
 
         M5Cardputer.Display.setFont(TAG_FONT); M5Cardputer.Display.setTextColor(audioApp.isPaused ? TFT_RED : C_PLAYING);
-        M5Cardputer.Display.setCursor(xStart + 5, yStart); M5Cardputer.Display.print(audioApp.isPaused ? "PAUSED" : "PLAYING");
+        M5Cardputer.Display.setCursor(xStart + NOW_PLAYING_PADDING_LEFT, yStart); M5Cardputer.Display.print(audioApp.isPaused ? "PAUSED" : "PLAYING");
 
         M5Cardputer.Display.setCursor(M5Cardputer.Display.width() - 55, yStart);
         switch(audioApp.shuffleMode) {
@@ -2118,7 +2133,7 @@ public:
             case LOOP_ONE: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("1T"); break;
         }
 
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(xStart + 5, yStart + 13);
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(xStart + NOW_PLAYING_PADDING_LEFT, yStart + 13);
         if (audioApp.currentTitle.length() > 0) {
             String t = truncateToFit(audioApp.currentTitle, M5Cardputer.Display.width() - PLAYLIST_WIDTH - 20);
             M5Cardputer.Display.print(t);
@@ -2126,7 +2141,8 @@ public:
 
         drawProgressBar();
 
-        int volY = yStart + 42; M5Cardputer.Display.setCursor(xStart + 5, volY); 
+        int volY = yStart + 42;
+        M5Cardputer.Display.setCursor(xStart + NOW_PLAYING_PADDING_LEFT, volY); 
         M5Cardputer.Display.setFont(&fonts::Font0);
         M5Cardputer.Display.setTextColor(C_ACCENT); 
         M5Cardputer.Display.print("VOL"); 
