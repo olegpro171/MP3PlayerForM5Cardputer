@@ -326,12 +326,17 @@ void applyTheme(int index) {
         case 1: // Cyberpunk
             C_BG_DARK = 0x0803; C_BG_LIGHT = 0x1866; C_HEADER = 0xA013;
             C_ACCENT = 0x07FF; C_PLAYING = 0xFFE0; C_HIGHLIGHT = 0xF800;
-            C_TEXT_MAIN = 0xFFFF; C_TEXT_DIM = 0x7BEF;
+            C_TEXT_MAIN = 0xFFFF; C_TEXT_DIM = 0xDC60;
             break;
-        case 2: // Retro Amber
-            C_BG_DARK = TFT_BLACK; C_BG_LIGHT = 0x2104; C_HEADER = 0x6A00; 
-            C_ACCENT = 0xFDA0; C_PLAYING = TFT_ORANGE; C_HIGHLIGHT = TFT_RED;
-            C_TEXT_MAIN = 0xFEA0; C_TEXT_DIM = 0xA340;
+        case 2: // Retro Amber — warm orange, no yellow
+            C_BG_DARK = TFT_BLACK;
+            C_BG_LIGHT = 0x0800; 
+            C_HEADER = 0x58e0;
+            C_ACCENT = 0xfc60;
+            C_PLAYING = 0xFBC0;
+            C_HIGHLIGHT = 0xf861; 
+            C_TEXT_MAIN = 0xf480; // 0xF560;
+            C_TEXT_DIM = 0xC2A0; //0x8300;
             break;
         case 3: // Hacker Green
             C_BG_DARK = 0x0000; C_BG_LIGHT = 0x0180; C_HEADER = 0x0320; 
@@ -351,7 +356,7 @@ const long timeoutValues[] = { 15000, 30000, 60000, 120000, 300000, 900000 };
 const char* timeoutLabels[] = { "15 Sec", "30 Sec", "1 Min", "2 Min", "5 Min", "15 Min" };
 const int brightnessValues[] = { 5, 40, 80, 140, 255 };
 const char* brightnessLabels[] = { "2%", "25%", "50%", "75%", "100%" };
-const char* powerModeLabels[] = { "OFF", "BASIC (160)", "ULTRA (80)" };
+const char* powerModeLabels[] = { "OFF", "Medium (160 MHz)", "High (80 MHz)" };
 const char* helpLines[] = {
   "--- MUSIC PLAYER ---",
   "Enter: Open Album  P: Pause",
