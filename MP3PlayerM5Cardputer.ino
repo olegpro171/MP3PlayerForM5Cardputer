@@ -99,6 +99,7 @@ const char* helpLines[] = {
   "N / B : Next / Prev Song",
   "/ / , : Seek +Xs / -Xs",
   "S: Search  F: Shuffle",
+  "E: Expand  Q: Collapse all",
   "Esc / ` : Settings",
   "V: Visualizer",
   "I:print Close Help",
@@ -122,7 +123,7 @@ const char* helpLines[] = {
   "GH: github.com/sanchitminda",
   "Share your suggestions!"
 };
-const int numHelpLines = 29;
+const int numHelpLines = 30;
 const int numSettings = 16;
 
 // ==========================================
@@ -1073,7 +1074,15 @@ public:
                 g_albumPlaybackIndex++;
                 if (g_albumPlaybackIndex >= (int)g_albumSongOffsets.size()) {
                     if (loopMode == LOOP_ALL) g_albumPlaybackIndex = 0;
-                    else { stop(); g_albumPlaybackIndex = 0; g_albumPlaybackActive = false; return; }
+                    else {
+                        // Album finished: go to first track and pause
+                        g_albumPlaybackIndex = 0;
+                        String firstPath = getAlbumSongPath(0);
+                        int globalIdx = findSongInPlaylist(firstPath);
+                        if (globalIdx >= 0) { play(globalIdx); togglePause(); }
+                        else { stop(); g_albumPlaybackActive = false; }
+                        return;
+                    }
                 }
             }
             String songPath = getAlbumSongPath(g_albumPlaybackIndex);
@@ -1566,10 +1575,11 @@ public:
         drawAlbumSongsFooter();
     }
 
+    // Full redraw of the now-playing area — called on state changes (play, pause, next, etc.)
     static void drawNowPlaying() {
         int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 5;
         M5Cardputer.Display.fillRect(xStart, yStart, M5Cardputer.Display.width() - xStart, 50, C_BG_DARK);
-        
+
         M5Cardputer.Display.setFont(&fonts::lgfxJapanGothic_12); M5Cardputer.Display.setTextColor(audioApp.isPaused ? TFT_ORANGE : C_PLAYING);
         M5Cardputer.Display.setCursor(xStart + 5, yStart); M5Cardputer.Display.print(audioApp.isPaused ? "[PAUSED]" : "PLAYING >");
 
@@ -1584,23 +1594,27 @@ public:
 
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(xStart + 5, yStart + 16);
         if (audioApp.currentTitle.length() > 0) M5Cardputer.Display.print(audioApp.currentTitle.substring(0, 15));
-        
-        {
-            int maxW = M5Cardputer.Display.width() - xStart - 10;
-            float pos = 0, size = 1;
-            if (audioApp.isPaused && audioApp.pausedSize > 0) {
-                pos = audioApp.paused_at; size = audioApp.pausedSize;
-            } else if (audioApp.id3 && audioApp.file) {
-                pos = audioApp.id3->getPos(); size = audioApp.id3->getSize();
-            }
-            int curW = (size > 0) ? (int)(pos / size * maxW) : 0;
-            M5Cardputer.Display.fillRect(xStart-3, yStart+30-3, maxW+6, 9, C_BG_DARK); M5Cardputer.Display.fillRect(xStart, yStart+30, maxW, 3, C_BG_LIGHT);
-            M5Cardputer.Display.fillRect(xStart, yStart+30, min(curW, maxW), 3, C_HIGHLIGHT); M5Cardputer.Display.fillCircle(xStart + min(curW, maxW), yStart+30+1, 3, C_TEXT_MAIN);
-        }
+
+        drawProgressBar();
 
         int volY = yStart + 42; M5Cardputer.Display.setCursor(xStart + 5, volY); M5Cardputer.Display.setFont(&fonts::Font0);
         M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("VOL "); M5Cardputer.Display.drawRect(xStart + 30, volY, 60, 6, C_BG_LIGHT);
         M5Cardputer.Display.fillRect(xStart + 31, volY + 1, (M5Cardputer.Speaker.getVolume() * 58) / 255, 4, C_ACCENT);
+    }
+
+    // Progress bar only — called every second in the loop, no flicker
+    static void drawProgressBar() {
+        int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 5;
+        int maxW = M5Cardputer.Display.width() - xStart - 10;
+        float pos = 0, size = 1;
+        if (audioApp.isPaused && audioApp.pausedSize > 0) {
+            pos = audioApp.paused_at; size = audioApp.pausedSize;
+        } else if (audioApp.id3 && audioApp.file) {
+            pos = audioApp.id3->getPos(); size = audioApp.id3->getSize();
+        }
+        int curW = (size > 0) ? (int)(pos / size * maxW) : 0;
+        M5Cardputer.Display.fillRect(xStart-3, yStart+30-3, maxW+6, 9, C_BG_DARK); M5Cardputer.Display.fillRect(xStart, yStart+30, maxW, 3, C_BG_LIGHT);
+        M5Cardputer.Display.fillRect(xStart, yStart+30, min(curW, maxW), 3, C_HIGHLIGHT); M5Cardputer.Display.fillCircle(xStart + min(curW, maxW), yStart+30+1, 3, C_TEXT_MAIN);
     }
 
     static void drawVisNowPlayingInfo(int textX, int maxChars) {
@@ -2803,7 +2817,7 @@ void loop() {
     if (currentState == UI_PLAYER && !isScreenOff) {
         static unsigned long lastVis = 0; if (millis() - lastVis > 30) { UIManager::drawVisualizer(); lastVis = millis(); }
         static unsigned long lastBat = 0; if (millis() - lastBat > 10000) { UIManager::drawBattery(); lastBat = millis(); }
-        static unsigned long lastProg = 0; if (millis() - lastProg > 1000) { UIManager::drawNowPlaying(); lastProg = millis(); }
+        static unsigned long lastProg = 0; if (millis() - lastProg > 1000) { UIManager::drawProgressBar(); lastProg = millis(); }
     }
 
     if (userSettings.timeoutIndex > 0 && !isScreenOff) {
@@ -2865,6 +2879,17 @@ void loop() {
                             UIManager::drawAlbumSongs();
                         }
                     }
+                }
+                else if (M5Cardputer.Keyboard.isKeyPressed('e')) {
+                    for (size_t i = 0; i < g_artistExpanded.size(); i++) g_artistExpanded[i] = true;
+                    rebuildSidebarRows(); UIManager::drawPlaylist();
+                }
+                else if (M5Cardputer.Keyboard.isKeyPressed('q')) {
+                    for (size_t i = 0; i < g_artistExpanded.size(); i++) g_artistExpanded[i] = false;
+                    rebuildSidebarRows();
+                    // Move cursor to nearest artist row
+                    if (g_sidebarCursor >= (int)g_sidebarRows.size()) g_sidebarCursor = max(0, (int)g_sidebarRows.size() - 1);
+                    UIManager::drawPlaylist();
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed('p')) { audioApp.togglePause(); UIManager::drawNowPlaying(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed('n')) { audioApp.next(); }
