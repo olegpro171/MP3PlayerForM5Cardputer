@@ -300,6 +300,7 @@ String utf8ToLower(const String& s) {
 #define ROW_HEIGHT 15
 #define HEADER_HEIGHT 20
 #define BOTTOM_BAR_HEIGHT 18
+#define SEARCH_VISIBLE_ROWS 4   // fewer rows than sidebar due to search box taking space
 #define MAX_VISIBLE_ROWS 6  
 
 // --- DYNAMIC COLORS & THEMES ---
@@ -425,7 +426,8 @@ String enteredText = "";
 
 // Search globals
 String g_searchQuery = "";
-std::vector<int> g_searchResults;  // indices into audioApp.songOffsets
+std::vector<int> g_searchResults;       // indices into audioApp.songOffsets
+std::vector<String> g_searchDisplay;    // cached "artist - title" for each result
 int g_searchCursor = 0;
 int g_searchScrollOffset = 0;
 
@@ -1643,6 +1645,7 @@ public:
 
     static void rebuildSearchResults() {
         g_searchResults.clear();
+        g_searchDisplay.clear();
         g_searchCursor = 0;
         g_searchScrollOffset = 0;
         if (g_searchQuery.length() == 0) return;
@@ -1656,10 +1659,30 @@ public:
         while (f.available()) {
             String line = f.readStringUntil('\n'); line.trim();
             String lineLower = utf8ToLower(line);
-            // Replace tabs with spaces so all fields are searchable as one string
             lineLower.replace("\t", " ");
             if (matchAllTokens(lineLower, queryLower)) {
                 g_searchResults.push_back(idx);
+                // Cache display string: "artist - title" from the same line we just read
+                String dispName = "";
+                if (useIndex) {
+                    int t1 = line.indexOf('\t');
+                    int t2 = (t1 >= 0) ? line.indexOf('\t', t1+1) : -1;
+                    int t3 = (t2 >= 0) ? line.indexOf('\t', t2+1) : -1;
+                    String artist = (t1 >= 0 && t2 >= 0) ? line.substring(t1+1, t2) : "";
+                    String title = (t2 >= 0 && t3 >= 0) ? line.substring(t2+1, t3) : "";
+                    artist.trim(); title.trim();
+                    if (artist.length() > 0 && title.length() > 0) dispName = artist + " - " + title;
+                    else if (title.length() > 0) dispName = title;
+                    else if (artist.length() > 0) dispName = artist;
+                }
+                if (dispName.length() == 0) {
+                    // Fallback: extract filename from path (first field)
+                    int t1 = line.indexOf('\t');
+                    String path = (t1 >= 0) ? line.substring(0, t1) : line;
+                    int slash = path.lastIndexOf('/');
+                    dispName = (slash >= 0) ? path.substring(slash + 1) : path;
+                }
+                g_searchDisplay.push_back(dispName);
             }
             idx++;
         }
@@ -1702,58 +1725,14 @@ public:
             M5Cardputer.Display.setCursor(6, yPos);
             M5Cardputer.Display.print("No results.");
         } else {
-            // Pre-read display names from search index (artist - title) before drawing
-            String displayNames[MAX_VISIBLE_ROWS];
-            int songIndices[MAX_VISIBLE_ROWS];
-            int visCount = 0;
-            bool useIdx = SD.exists(SEARCH_INDEX_FILE);
-            File idxF = useIdx ? SD.open(SEARCH_INDEX_FILE) : File();
-            for (int i = 0; i < MAX_VISIBLE_ROWS; i++) {
+            // Display from cached g_searchDisplay — no SD I/O
+            int maxRows = SEARCH_VISIBLE_ROWS;
+            for (int i = 0; i < maxRows; i++) {
                 int ri = g_searchScrollOffset + i;
                 if (ri >= totalResults) break;
                 int songIdx = g_searchResults[ri];
-                songIndices[visCount] = songIdx;
-                // Try to get artist - title from search index
-                String dispName = "";
-                if (idxF && useIdx) {
-                    // Read through index to find line N = songIdx
-                    idxF.seek(0);
-                    int lineIdx = 0;
-                    while (idxF.available()) {
-                        String line = idxF.readStringUntil('\n');
-                        if (lineIdx == songIdx) {
-                            line.trim();
-                            int t1 = line.indexOf('\t');
-                            int t2 = (t1 >= 0) ? line.indexOf('\t', t1+1) : -1;
-                            int t3 = (t2 >= 0) ? line.indexOf('\t', t2+1) : -1;
-                            String artist = (t1 >= 0 && t2 >= 0) ? line.substring(t1+1, t2) : "";
-                            String title = (t2 >= 0 && t3 >= 0) ? line.substring(t2+1, t3) : "";
-                            artist.trim(); title.trim();
-                            if (artist.length() > 0 && title.length() > 0)
-                                dispName = artist + " - " + title;
-                            else if (title.length() > 0) dispName = title;
-                            else if (artist.length() > 0) dispName = artist;
-                            break;
-                        }
-                        lineIdx++;
-                    }
-                }
-                // Fallback to filename
-                if (dispName.length() == 0) {
-                    String songPath = audioApp.getSongPath(songIdx);
-                    int slash = songPath.lastIndexOf('/');
-                    dispName = (slash >= 0) ? songPath.substring(slash + 1) : songPath;
-                }
-                displayNames[visCount] = truncateToFit(dispName, 228);
-                visCount++;
-            }
-            if (idxF) idxF.close();
-
-            // Now draw from RAM
-            for (int i = 0; i < visCount; i++) {
-                int ri = g_searchScrollOffset + i;
                 bool isSelected = (ri == g_searchCursor);
-                bool isPlaying  = (songIndices[i] == audioApp.currentIndex);
+                bool isPlaying  = (songIdx == audioApp.currentIndex);
 
                 if (isSelected) {
                     M5Cardputer.Display.fillRect(2, yPos - 1, M5Cardputer.Display.width() - 4, ROW_HEIGHT, C_ACCENT);
@@ -1766,7 +1745,8 @@ public:
 
                 M5Cardputer.Display.setCursor(6, yPos + 2);
                 if (isPlaying && !isSelected) M5Cardputer.Display.print("> ");
-                M5Cardputer.Display.print(displayNames[i]);
+                String disp = (ri < (int)g_searchDisplay.size()) ? truncateToFit(g_searchDisplay[ri], 228) : "";
+                M5Cardputer.Display.print(disp);
                 yPos += ROW_HEIGHT;
             }
 
@@ -1774,8 +1754,8 @@ public:
             M5Cardputer.Display.setTextColor(C_ACCENT);
             if (g_searchScrollOffset > 0)
                 M5Cardputer.Display.drawString("^", M5Cardputer.Display.width() - 10, boxY + 22);
-            if (g_searchScrollOffset + MAX_VISIBLE_ROWS < totalResults)
-                M5Cardputer.Display.drawString("v", M5Cardputer.Display.width() - 10, boxY + 20 + (MAX_VISIBLE_ROWS * ROW_HEIGHT) - 6);
+            if (g_searchScrollOffset + maxRows < totalResults)
+                M5Cardputer.Display.drawString("v", M5Cardputer.Display.width() - 10, boxY + 20 + (maxRows * ROW_HEIGHT) - 6);
         }
 
         // Footer
@@ -3631,14 +3611,14 @@ void loop() {
                         if (g_searchCursor < 0) g_searchCursor = (int)g_searchResults.size() - 1;
                         if (g_searchCursor < g_searchScrollOffset) g_searchScrollOffset = g_searchCursor;
                         if (g_searchCursor == (int)g_searchResults.size() - 1)
-                            g_searchScrollOffset = max(0, (int)g_searchResults.size() - MAX_VISIBLE_ROWS);
+                            g_searchScrollOffset = max(0, (int)g_searchResults.size() - SEARCH_VISIBLE_ROWS);
                     }
                     redraw = true;
                 } else if (M5Cardputer.Keyboard.isKeyPressed('.')) {
                     if (g_searchResults.size() > 0) {
                         g_searchCursor++;
                         if (g_searchCursor >= (int)g_searchResults.size()) { g_searchCursor = 0; g_searchScrollOffset = 0; }
-                        if (g_searchCursor >= g_searchScrollOffset + MAX_VISIBLE_ROWS) g_searchScrollOffset++;
+                        if (g_searchCursor >= g_searchScrollOffset + SEARCH_VISIBLE_ROWS) g_searchScrollOffset++;
                     }
                     redraw = true;
                 } else if (status.enter) {
