@@ -2844,7 +2844,25 @@ void setup() {
     visSprite.createSprite(M5Cardputer.Display.width() - PLAYLIST_WIDTH - 2, M5Cardputer.Display.height() - HEADER_HEIGHT - 55 - BOTTOM_BAR_HEIGHT);
 
     SPI.begin(SD_SPI_SCK_PIN, SD_SPI_MISO_PIN, SD_SPI_MOSI_PIN, SD_SPI_CS_PIN);
-    if (!SD.begin(SD_SPI_CS_PIN, SPI, 25000000)) while(1);
+    while (!SD.begin(SD_SPI_CS_PIN, SPI, 25000000)) {
+        M5Cardputer.Display.fillScreen(TFT_BLACK);
+        M5Cardputer.Display.setFont(&fonts::Font0);
+        M5Cardputer.Display.setTextColor(TFT_RED);
+        M5Cardputer.Display.setCursor(30, 50);
+        M5Cardputer.Display.print("No SD Card Found!");
+        M5Cardputer.Display.setTextColor(TFT_WHITE);
+        M5Cardputer.Display.setCursor(20, 75);
+        M5Cardputer.Display.print("Insert card and press");
+        M5Cardputer.Display.setCursor(55, 90);
+        M5Cardputer.Display.print("any key to retry");
+        // Wait for key press before retrying
+        while (true) {
+            M5Cardputer.update();
+            if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) break;
+            if (M5Cardputer.BtnA.wasPressed()) break;
+            delay(50);
+        }
+    }
 
     WebServerManager::setup();
     M5Cardputer.Display.setBrightness(userSettings.brightness);
