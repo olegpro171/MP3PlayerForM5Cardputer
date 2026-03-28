@@ -1652,7 +1652,6 @@ public:
         // Must set font BEFORE measuring text width — the title uses lgfxJapanGothic_12
         M5Cardputer.Display.setFont(&fonts::lgfxJapanGothic_12);
         int txtW = M5Cardputer.Display.textWidth(title.c_str());
-        if (txtW <= titleAreaW) return; // no scrolling needed
         g_marqueeTitle.update(title, txtW, titleAreaW);
         M5Cardputer.Display.fillRect(titleX, titleY, titleAreaW, 14, C_BG_DARK);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
