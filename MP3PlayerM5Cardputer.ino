@@ -91,7 +91,7 @@ const char* timeoutLabels[] = { "Always On", "30 Sec", "1 Min", "2 Min", "5 Min"
 const char* powerModeLabels[] = { "OFF", "BASIC (160)", "ULTRA (80)" };
 const char* helpLines[] = {
   "--- MUSIC PLAYER ---",
-  "Enter: Open Album / Play",
+  "Enter: Open Album  P: Pause",
   "; / . : Scroll Albums/Songs",
   "[ / ] : Volume - / +",
   "N / B : Next / Prev Song",
@@ -2618,6 +2618,7 @@ void loop() {
                         UIManager::drawAlbumSongs();
                     }
                 }
+                else if (M5Cardputer.Keyboard.isKeyPressed('p')) { audioApp.togglePause(); UIManager::drawNowPlaying(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed('n')) { audioApp.next(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed('b')) { audioApp.prev(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed('s')) {
