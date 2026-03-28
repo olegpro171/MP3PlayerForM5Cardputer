@@ -111,6 +111,7 @@ const char* helpLines[] = {
   "Btn A (2 Clicks): Next",
   "Btn A (3 Clicks): Prev",
   "Press any key to wake screen",
+  "Hold Btn A on boot: Reset",
   "--- ABOUT ---",
   "Made with <3 by SaM",
   "Sit back, relax, and",
@@ -119,7 +120,7 @@ const char* helpLines[] = {
   "GH: github.com/sanchitminda",
   "Share your suggestions!"
 };
-const int numHelpLines = 28;
+const int numHelpLines = 29;
 const int numSettings = 16;
 
 // ==========================================
@@ -267,6 +268,16 @@ public:
         userSettings.showSplash = preferences.getBool("showSplash", true);
         preferences.end();
 
+        // Validate all settings to prevent crashes from corrupted NVS
+        userSettings.brightness = constrain(userSettings.brightness, 5, 255);
+        userSettings.timeoutIndex = constrain(userSettings.timeoutIndex, 0, 4);
+        userSettings.spkRateIndex = constrain(userSettings.spkRateIndex, 0, 4);
+        userSettings.powerSaverMode = constrain(userSettings.powerSaverMode, 0, 2);
+        userSettings.themeIndex = constrain(userSettings.themeIndex, 0, NUM_THEMES - 1);
+        userSettings.visMode = constrain(userSettings.visMode, 0, NUM_VIS_MODES - 1);
+        userSettings.seek = constrain(userSettings.seek, 5, 60);
+        userSettings.volume = constrain(userSettings.volume, 0, 255);
+        if (userSettings.lastIndex < 0) userSettings.lastIndex = 0;
         if(userSettings.apSSID.length() == 0) userSettings.apSSID = "Cardputer";
         if(userSettings.apPass.length() < 8) userSettings.apPass = "12345678";
     }
@@ -2489,8 +2500,21 @@ LGFX_Sprite* SplashScreen::splashSprite = nullptr;
 // ==========================================
 void setup() {
     auto cfg = M5.config(); cfg.external_speaker.hat_spk = true; M5Cardputer.begin(cfg);
-    
+
     if (nvs_flash_init() != ESP_OK) { nvs_flash_erase(); nvs_flash_init(); }
+
+    // Factory reset: hold Button A (G0) during boot to erase all settings
+    M5Cardputer.update();
+    if (M5Cardputer.BtnA.isPressed()) {
+        nvs_flash_erase(); nvs_flash_init();
+        M5Cardputer.Display.setRotation(1);
+        M5Cardputer.Display.fillScreen(TFT_BLACK);
+        M5Cardputer.Display.setTextColor(TFT_RED);
+        M5Cardputer.Display.setCursor(30, 55);
+        M5Cardputer.Display.print("Settings Reset!");
+        delay(2000);
+    }
+
     ConfigManager::load(); applyCpuFrequency();
     applyTheme(userSettings.themeIndex);
     auto spk_cfg = M5Cardputer.Speaker.config(); spk_cfg.sample_rate = sampleRateValues[userSettings.spkRateIndex];
