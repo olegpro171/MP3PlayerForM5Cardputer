@@ -925,6 +925,22 @@ public:
     // -----------------------------------------------
     // SEARCH UI
     // -----------------------------------------------
+    // Multi-token search: "li fa" matches "Linkin Park - Faint"
+    // Each space-separated token must appear somewhere in the filename.
+    static bool matchAllTokens(const String& fname, const String& queryLower) {
+        String remaining = queryLower;
+        remaining.trim();
+        while (remaining.length() > 0) {
+            int sp = remaining.indexOf(' ');
+            String token;
+            if (sp >= 0) { token = remaining.substring(0, sp); remaining = remaining.substring(sp + 1); remaining.trim(); }
+            else { token = remaining; remaining = ""; }
+            if (token.length() == 0) continue;
+            if (fname.indexOf(token) < 0) return false;
+        }
+        return true;
+    }
+
     static void rebuildSearchResults() {
         g_searchResults.clear();
         g_searchCursor = 0;
@@ -937,10 +953,8 @@ public:
         while (f.available()) {
             String line = f.readStringUntil('\n'); line.trim();
             String lineLower = line; lineLower.toLowerCase();
-            // Extract filename portion for matching
-            int slash = lineLower.lastIndexOf('/');
-            String fname = (slash >= 0) ? lineLower.substring(slash + 1) : lineLower;
-            if (fname.indexOf(queryLower) >= 0) {
+            // Match against full path (includes folder names and filename)
+            if (matchAllTokens(lineLower, queryLower)) {
                 g_searchResults.push_back(idx);
             }
             idx++;
