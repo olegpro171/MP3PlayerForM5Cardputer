@@ -2,14 +2,20 @@
 /// Made by: Sanchit Minda() | Github/sanchitminda
 /// Fully Functional OOP & State Machine Architecture
 //////////////////////////////////////////////
+
+// Comment out to disable Wi-Fi/Web streaming and reduce firmware size
+// #define ENABLE_WIFI
+
 #include <vector>
 #include <M5Unified.h>
 #include <M5Cardputer.h>
 #include <SPI.h>
 #include <Preferences.h>
 #include <nvs_flash.h>
+#ifdef ENABLE_WIFI
 #include <WiFi.h>
 #include <WebServer.h>
+#endif
 #include "USB.h"
 #include "USBMSC.h"
 
@@ -371,6 +377,7 @@ const char* helpLines[] = {
   "Btn A (3 Clicks): Prev",
   "Press any key to wake screen",
   "Hold Esc on boot: Reset",
+  "",
   "--- ABOUT ---",
   "Fork of SaM player",
   "made by Oleg Proshkin.",
@@ -380,8 +387,17 @@ const char* helpLines[] = {
   "GH: github.com/sanchitminda",
   "Share your suggestions!"
 };
-const int numHelpLines = 33;
-const int numSettings = 16;
+const int numHelpLines = 34;
+// Settings menu layout: cases 0-3 are common, then Wi-Fi cases (if enabled), then the rest
+#ifdef ENABLE_WIFI
+#define WIFI_SETTINGS_OFFSET 6   // after 4=Wi-Fi Power, 5=Wi-Fi Mode
+#define ACTION_SETTINGS_OFFSET 11 // after Wi-Fi setup entries
+const int numSettings = 15;
+#else
+#define WIFI_SETTINGS_OFFSET 4   // no Wi-Fi entries
+#define ACTION_SETTINGS_OFFSET 7  // no Wi-Fi setup entries
+const int numSettings = 11;
+#endif
 
 // ==========================================
 // GLOBALS
@@ -391,7 +407,6 @@ struct Settings {
     int themeIndex = 0;
     int visMode = 0;
     int timeoutIndex = 0;      
-    bool resumePlay = true;    
     int spkRateIndex = 4;      
     int lastIndex = 0;         
     uint32_t lastPos = 0;      
@@ -412,7 +427,9 @@ struct Settings {
 
 Settings userSettings;
 Preferences preferences;
+#ifdef ENABLE_WIFI
 WebServer server(80);
+#endif
 LGFX_Sprite visSprite(&M5Cardputer.Display);
 
 UIState currentState = UI_PLAYER;
@@ -420,8 +437,10 @@ unsigned long lastInputTime = 0;
 bool isScreenOff = false;
 
 // Text Input Globals
+#ifdef ENABLE_WIFI
 int textInputTarget = 0; // 0=STA Pass, 1=AP SSID, 2=AP Pass
 String enteredText = "";
+#endif
 
 
 // Search globals
@@ -610,7 +629,6 @@ public:
         preferences.begin("sam_music", true);
         userSettings.brightness = preferences.getInt("brightness", 100);
         userSettings.timeoutIndex = preferences.getInt("timeoutIndex", 0);
-        userSettings.resumePlay = preferences.getBool("resumePlay", true);
         userSettings.spkRateIndex = preferences.getInt("spkRate", 4);
         userSettings.lastIndex = preferences.getInt("lastIndex", 0);
         userSettings.lastPos = preferences.getUInt("lastPos", 0);
@@ -651,7 +669,6 @@ public:
         preferences.begin("sam_music", false);
         preferences.putInt("brightness", userSettings.brightness);
         preferences.putInt("timeoutIndex", userSettings.timeoutIndex);
-        preferences.putBool("resumePlay", userSettings.resumePlay);
         preferences.putInt("spkRate", userSettings.spkRateIndex);
         preferences.putInt("lastIndex", userSettings.lastIndex);
         preferences.putUInt("lastPos", userSettings.lastPos);
@@ -678,7 +695,7 @@ public:
         File file = SD.open(CONFIG_FILE, FILE_WRITE);
         if (file) {
             file.println(userSettings.brightness); file.println(userSettings.timeoutIndex);
-            file.println(userSettings.resumePlay ? 1 : 0); file.println(userSettings.spkRateIndex);
+            file.println(userSettings.spkRateIndex);
             file.println(userSettings.lastIndex); file.println(userSettings.lastPos);
             file.println(userSettings.wifiEnabled ? 1 : 0); file.println(userSettings.wifiSSID);
             file.println(userSettings.wifiPass); file.println(userSettings.isAPMode ? 1 : 0);
@@ -703,7 +720,6 @@ public:
         if (file) {
             if(file.available()) userSettings.brightness = file.readStringUntil('\n').toInt();
             if(file.available()) userSettings.timeoutIndex = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.resumePlay = (file.readStringUntil('\n').toInt() == 1);
             if(file.available()) userSettings.spkRateIndex = file.readStringUntil('\n').toInt();
             if(file.available()) userSettings.lastIndex = file.readStringUntil('\n').toInt();
             if(file.available()) userSettings.lastPos = file.readStringUntil('\n').toInt();
@@ -729,7 +745,11 @@ public:
 };
 
 void applyCpuFrequency() {
-    if (userSettings.wifiEnabled || userSettings.powerSaverMode == 0) setCpuFrequencyMhz(240); 
+    if (
+#ifdef ENABLE_WIFI
+        userSettings.wifiEnabled ||
+#endif
+        userSettings.powerSaverMode == 0) setCpuFrequencyMhz(240); 
     else if (userSettings.powerSaverMode == 1) setCpuFrequencyMhz(160); 
     else setCpuFrequencyMhz(80); 
 }
@@ -1542,7 +1562,7 @@ public:
 
     void loopTasks() {
         if (decoder && decoder->isRunning()) {
-            if (!decoder->loop()) { decoder->stop(); next(true); if(userSettings.resumePlay) ConfigManager::save(id3 ? id3->getPos() : 0, currentIndex); }
+            if (!decoder->loop()) { decoder->stop(); next(true); ConfigManager::save(id3 ? id3->getPos() : 0, currentIndex); }
         }
     }
 
@@ -1618,9 +1638,11 @@ public:
     static int settingsCursor;
     static int menuScrollOffset;
     static bool showVisualizer;
+#ifdef ENABLE_WIFI
     static int wifiCursor;
     static int wifiScrollOffset;
     static int wifiNetworkCount;
+#endif
     static int helpScrollOffset;
 
 
@@ -1844,11 +1866,14 @@ public:
         M5Cardputer.Display.fillRect(0, 0, M5Cardputer.Display.width(), HEADER_HEIGHT, C_HEADER);
         M5Cardputer.Display.setFont(&fonts::Font0); 
         String prefix = "Music Player";
+#ifdef ENABLE_WIFI
         if (userSettings.wifiEnabled) {
-            if (userSettings.isAPMode) { prefix = WiFi.softAPIP().toString(); M5Cardputer.Display.setTextColor(TFT_ORANGE, C_HEADER); } 
-            else if (WiFi.status() == WL_CONNECTED) { prefix = WiFi.localIP().toString(); M5Cardputer.Display.setTextColor(C_ACCENT, C_HEADER); } 
+            if (userSettings.isAPMode) { prefix = WiFi.softAPIP().toString(); M5Cardputer.Display.setTextColor(TFT_ORANGE, C_HEADER); }
+            else if (WiFi.status() == WL_CONNECTED) { prefix = WiFi.localIP().toString(); M5Cardputer.Display.setTextColor(C_ACCENT, C_HEADER); }
             else M5Cardputer.Display.setTextColor(C_TEXT_MAIN, C_HEADER);
-        } else M5Cardputer.Display.setTextColor(C_TEXT_MAIN, C_HEADER);
+        } else
+#endif
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN, C_HEADER);
         
         String headerText = prefix + " [" + String(g_albumOffsets.size()) + " albums]";
         M5Cardputer.Display.drawString(headerText.c_str(), 5, 5); 
@@ -1939,9 +1964,9 @@ public:
                 } else {
                     M5Cardputer.Display.setTextColor(C_TEXT_DIM);
                 }
-                String dispName = truncateToFit("  " + name, 108);
+                String prefix = (isCurrentAlbum && !isSelected) ? "> " : "  ";
+                String dispName = truncateToFit(prefix + name, 108);
                 M5Cardputer.Display.setCursor(xPos + 5, yPos + 3);
-                if (isCurrentAlbum && !isSelected) M5Cardputer.Display.print(">");
                 M5Cardputer.Display.print(dispName);
             }
             yPos += ROW_HEIGHT;
@@ -2040,7 +2065,7 @@ public:
         }
 
         // All data in RAM — now clear only the content area and draw rows
-        M5Cardputer.Display.fillRect(0, HEADER_HEIGHT, M5Cardputer.Display.width(), contentH, C_BG_DARK);
+        M5Cardputer.Display.fillRect(0, HEADER_HEIGHT, M5Cardputer.Display.width(), contentH, C_BG_LIGHT);
 
         int yPos = contentY;
 
@@ -2275,24 +2300,28 @@ public:
             switch (idx) {
                 case 0: M5Cardputer.Display.printf("Brightness: %d", userSettings.brightness); break;
                 case 1: M5Cardputer.Display.printf("Screen Off: %s", timeoutLabels[userSettings.timeoutIndex]); break;
-                case 2: M5Cardputer.Display.printf("Resume Play: %s", userSettings.resumePlay ? "ON" : "OFF"); break;
-                case 3: M5Cardputer.Display.printf("DAC Rate: %s", sampleRateLabels[userSettings.spkRateIndex]); break;
-                case 4: M5Cardputer.Display.printf("Seek Value: %d", userSettings.seek); break;
-                case 5: M5Cardputer.Display.printf("Wi-Fi Power: %s", userSettings.wifiEnabled ? "ON" : "OFF"); break;
-                case 6: M5Cardputer.Display.printf("Wi-Fi Mode: %s", userSettings.isAPMode ? "AP (Host)" : "STA (Client)"); break; 
-                case 7: M5Cardputer.Display.printf("Power Saver: %s", powerModeLabels[userSettings.powerSaverMode]); break;
-                case 8: M5Cardputer.Display.printf("Theme: %s", themeLabels[userSettings.themeIndex]); break;
-                case 9: M5Cardputer.Display.printf("Visualizer: %s", visModeLabels[userSettings.visMode]); break;
-                case 10: M5Cardputer.Display.print("> Setup Wi-Fi Network"); break; 
-                case 11: M5Cardputer.Display.print("> Setup AP (Host)"); break;
-                case 12: M5Cardputer.Display.print("[ RESCAN LIBRARY ]"); break;    
-                case 13: M5Cardputer.Display.print("[ EXPORT CONFIG TO SD ]"); break; 
-                case 14: M5Cardputer.Display.print("[ IMPORT FROM SD ]"); break;
-                case 15: M5Cardputer.Display.printf("Splash Screen: %s", userSettings.showSplash ? "ON" : "OFF"); break;
+                case 2: M5Cardputer.Display.printf("DAC Rate: %s", sampleRateLabels[userSettings.spkRateIndex]); break;
+                case 3: M5Cardputer.Display.printf("Seek Value: %d", userSettings.seek); break;
+#ifdef ENABLE_WIFI
+                case 4: M5Cardputer.Display.printf("Wi-Fi Power: %s", userSettings.wifiEnabled ? "ON" : "OFF"); break;
+                case 5: M5Cardputer.Display.printf("Wi-Fi Mode: %s", userSettings.isAPMode ? "AP (Host)" : "STA (Client)"); break;
+#endif
+                case WIFI_SETTINGS_OFFSET + 0: M5Cardputer.Display.printf("Power Saver: %s", powerModeLabels[userSettings.powerSaverMode]); break;
+                case WIFI_SETTINGS_OFFSET + 1: M5Cardputer.Display.printf("Theme: %s", themeLabels[userSettings.themeIndex]); break;
+                case WIFI_SETTINGS_OFFSET + 2: M5Cardputer.Display.printf("Visualizer: %s", visModeLabels[userSettings.visMode]); break;
+#ifdef ENABLE_WIFI
+                case WIFI_SETTINGS_OFFSET + 3: M5Cardputer.Display.print("> Setup Wi-Fi Network"); break;
+                case WIFI_SETTINGS_OFFSET + 4: M5Cardputer.Display.print("> Setup AP (Host)"); break;
+#endif
+                case ACTION_SETTINGS_OFFSET + 0: M5Cardputer.Display.print("[ RESCAN LIBRARY ]"); break;
+                case ACTION_SETTINGS_OFFSET + 1: M5Cardputer.Display.print("[ EXPORT CONFIG TO SD ]"); break;
+                case ACTION_SETTINGS_OFFSET + 2: M5Cardputer.Display.print("[ IMPORT FROM SD ]"); break;
+                case ACTION_SETTINGS_OFFSET + 3: M5Cardputer.Display.printf("Splash Screen: %s", userSettings.showSplash ? "ON" : "OFF"); break;
             }
         }
     }
 
+#ifdef ENABLE_WIFI
     static void drawWifiScanner() {
         M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.fillRect(0, 0, M5Cardputer.Display.width(), HEADER_HEIGHT, C_HEADER);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(5, 5); M5Cardputer.Display.print("Select Wi-Fi Network");
@@ -2300,7 +2329,7 @@ public:
         if (wifiNetworkCount == 0) { M5Cardputer.Display.setCursor(10, yPos); M5Cardputer.Display.print("No networks found."); return; }
         for (int i = 0; i < 6; i++) {
             int idx = wifiScrollOffset + i; if (idx >= wifiNetworkCount) break;
-            if (idx == wifiCursor) { M5Cardputer.Display.fillRect(2, yPos - 2, M5Cardputer.Display.width() - 4, ROW_HEIGHT, C_ACCENT); M5Cardputer.Display.setTextColor(C_BG_DARK); } 
+            if (idx == wifiCursor) { M5Cardputer.Display.fillRect(2, yPos - 2, M5Cardputer.Display.width() - 4, ROW_HEIGHT, C_ACCENT); M5Cardputer.Display.setTextColor(C_BG_DARK); }
             else M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
             M5Cardputer.Display.setCursor(10, yPos); M5Cardputer.Display.print(WiFi.SSID(idx).substring(0, 30)); yPos += ROW_HEIGHT;
         }
@@ -2308,19 +2337,20 @@ public:
 
     static void drawTextInput() {
         M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.fillRect(0, 0, M5Cardputer.Display.width(), HEADER_HEIGHT, C_HEADER);
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(5, 5); 
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(5, 5);
         if (textInputTarget == 0) M5Cardputer.Display.print("Enter Client Password:");
         else if (textInputTarget == 1) M5Cardputer.Display.print("Set AP Name (SSID):");
         else if (textInputTarget == 2) M5Cardputer.Display.print("Set AP Password (8+ chars):");
 
         M5Cardputer.Display.drawRect(10, HEADER_HEIGHT + 35, M5Cardputer.Display.width() - 20, 25, C_TEXT_MAIN);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(15, HEADER_HEIGHT + 40);
-        
+
         String displayStr = enteredText;
         if (textInputTarget == 0) { displayStr = ""; for(int i=0; i<(int)enteredText.length(); i++) displayStr += "*"; }
-        M5Cardputer.Display.print(displayStr + "_"); 
+        M5Cardputer.Display.print(displayStr + "_");
         M5Cardputer.Display.setCursor(10, M5Cardputer.Display.height() - 20); M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.print("ENTER to Save  |  ` to Cancel");
     }
+#endif
 
     static void drawBaseUI() {
         M5Cardputer.Display.fillRect(0, HEADER_HEIGHT, M5Cardputer.Display.width(), M5Cardputer.Display.height() - HEADER_HEIGHT, C_BG_DARK);
@@ -2330,7 +2360,9 @@ public:
 };
 
 int UIManager::settingsCursor = 0; int UIManager::menuScrollOffset = 0; bool UIManager::showVisualizer = true;
+#ifdef ENABLE_WIFI
 int UIManager::wifiCursor = 0; int UIManager::wifiScrollOffset = 0; int UIManager::wifiNetworkCount = 0;
+#endif
 int UIManager::helpScrollOffset = 0;
 
 void AudioEngine::MDCallback(void *cbData, const char *type, bool isUnicode, const char *string) {
@@ -2340,6 +2372,7 @@ void AudioEngine::MDCallback(void *cbData, const char *type, bool isUnicode, con
     else if (strcmp(type, "Album") == 0) { audioApp.currentAlbum = String(string); }
 }
 
+#ifdef ENABLE_WIFI
 // ==========================================
 // WEB SERVER MANAGER
 // ==========================================
@@ -2465,6 +2498,7 @@ player.addEventListener('ended',playNext);
         server.begin();
     }
 };
+#endif // ENABLE_WIFI
 
 // ==========================================
 // BOOT MENU
@@ -3297,7 +3331,9 @@ void setup() {
     SPI.begin(SD_SPI_SCK_PIN, SD_SPI_MISO_PIN, SD_SPI_MOSI_PIN, SD_SPI_CS_PIN);
     if (!SD.begin(SD_SPI_CS_PIN, SPI, 25000000)) while(1);
 
+#ifdef ENABLE_WIFI
     WebServerManager::setup();
+#endif
     M5Cardputer.Display.setBrightness(userSettings.brightness);
 
     // Show splash screen animation
@@ -3308,7 +3344,7 @@ void setup() {
     M5Cardputer.Speaker.setVolume(userSettings.volume);
 
     if (audioApp.loadPlaylist()) {
-        if (userSettings.resumePlay && userSettings.lastIndex < (int)audioApp.songOffsets.size())
+        if (userSettings.lastIndex < (int)audioApp.songOffsets.size())
             audioApp.play(userSettings.lastIndex, userSettings.lastPos);
         else audioApp.play(0);
     } else {
@@ -3331,7 +3367,11 @@ void setup() {
 }
 
 void loop() {
-    M5Cardputer.update(); server.handleClient(); audioApp.loopTasks();
+    M5Cardputer.update();
+#ifdef ENABLE_WIFI
+    server.handleClient();
+#endif
+    audioApp.loopTasks();
     static int lastPlayingIndex = -1;
     if (lastPlayingIndex != audioApp.currentIndex && currentState == UI_PLAYER && !isScreenOff) {
         lastPlayingIndex = audioApp.currentIndex;
@@ -3493,39 +3533,43 @@ void loop() {
                     switch (UIManager::settingsCursor) {
                         case 0: userSettings.brightness = constrain(userSettings.brightness + (right?25:-25), 5, 255); M5Cardputer.Display.setBrightness(userSettings.brightness); break;
                         case 1: userSettings.timeoutIndex = (userSettings.timeoutIndex + (right?1:-1) + 5) % 5; break;
-                        case 2: userSettings.resumePlay = !userSettings.resumePlay; break;
-                        case 3: userSettings.spkRateIndex = (userSettings.spkRateIndex + (right?1:-1) + 5) % 5; 
+                        case 2: userSettings.spkRateIndex = (userSettings.spkRateIndex + (right?1:-1) + 5) % 5;
                                 { auto c = M5Cardputer.Speaker.config(); c.sample_rate = sampleRateValues[userSettings.spkRateIndex]; M5Cardputer.Speaker.config(c); } break;
-                        case 4: userSettings.seek = constrain(userSettings.seek + (right?5:-5), 5, 60); break;
-                        case 5: userSettings.wifiEnabled = !userSettings.wifiEnabled; break;
-                        case 6: userSettings.isAPMode = !userSettings.isAPMode; break;
-                        case 7: userSettings.powerSaverMode = (userSettings.powerSaverMode + (right?1:-1) + 3) % 3; applyCpuFrequency(); break;
-                        case 8:
-                            userSettings.themeIndex = (userSettings.themeIndex + (right?1:-1) + NUM_THEMES) % NUM_THEMES;
-                            applyTheme(userSettings.themeIndex);
-                            UIManager::drawBaseUI();
-                            break;
-                        case 9:
-                            userSettings.visMode = (userSettings.visMode + (right?1:-1) + NUM_VIS_MODES) % NUM_VIS_MODES;
-                            UIManager::drawBaseUI();
-                            break;
-                        case 15: userSettings.showSplash = !userSettings.showSplash; break;
+                        case 3: userSettings.seek = constrain(userSettings.seek + (right?5:-5), 5, 60); break;
+#ifdef ENABLE_WIFI
+                        case 4: userSettings.wifiEnabled = !userSettings.wifiEnabled; break;
+                        case 5: userSettings.isAPMode = !userSettings.isAPMode; break;
+#endif
                     }
+                    // Handle offset-based settings
+                    int offIdx = UIManager::settingsCursor;
+                    if (offIdx == WIFI_SETTINGS_OFFSET + 0) { userSettings.powerSaverMode = (userSettings.powerSaverMode + (right?1:-1) + 3) % 3; applyCpuFrequency(); }
+                    else if (offIdx == WIFI_SETTINGS_OFFSET + 1) {
+                        userSettings.themeIndex = (userSettings.themeIndex + (right?1:-1) + NUM_THEMES) % NUM_THEMES;
+                        applyTheme(userSettings.themeIndex); UIManager::drawBaseUI();
+                    }
+                    else if (offIdx == WIFI_SETTINGS_OFFSET + 2) {
+                        userSettings.visMode = (userSettings.visMode + (right?1:-1) + NUM_VIS_MODES) % NUM_VIS_MODES;
+                        UIManager::drawBaseUI();
+                    }
+                    else if (offIdx == ACTION_SETTINGS_OFFSET + 3) { userSettings.showSplash = !userSettings.showSplash; }
                     UIManager::drawSettings();
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
-                    switch(UIManager::settingsCursor) {
-                        case 10: // Wi-Fi Setup
-                            currentState = UI_WIFI_SCAN; WiFi.mode(WIFI_STA); WiFi.disconnect(); delay(100);
-                            UIManager::wifiNetworkCount = WiFi.scanNetworks(); UIManager::wifiCursor = 0; UIManager::wifiScrollOffset = 0;
-                            UIManager::drawWifiScanner(); break;
-                        case 11: // AP Setup
-                            currentState = UI_TEXT_INPUT; textInputTarget = 1; enteredText = userSettings.apSSID;
-                            UIManager::drawTextInput(); break;
-                        case 12: audioApp.performFullScan(); loadAlbumIndex(); currentState = UI_PLAYER; UIManager::drawBaseUI(); break;
-                        case 13: ConfigManager::exportToSD(); currentState = UI_PLAYER; UIManager::drawBaseUI(); break;
-                        case 14: ConfigManager::importFromSD(); currentState = UI_PLAYER; UIManager::drawBaseUI(); break;
-                    }
+                    int enterIdx = UIManager::settingsCursor;
+#ifdef ENABLE_WIFI
+                    if (enterIdx == WIFI_SETTINGS_OFFSET + 3) { // Wi-Fi Setup
+                        currentState = UI_WIFI_SCAN; WiFi.mode(WIFI_STA); WiFi.disconnect(); delay(100);
+                        UIManager::wifiNetworkCount = WiFi.scanNetworks(); UIManager::wifiCursor = 0; UIManager::wifiScrollOffset = 0;
+                        UIManager::drawWifiScanner();
+                    } else if (enterIdx == WIFI_SETTINGS_OFFSET + 4) { // AP Setup
+                        currentState = UI_TEXT_INPUT; textInputTarget = 1; enteredText = userSettings.apSSID;
+                        UIManager::drawTextInput();
+                    } else
+#endif
+                    if (enterIdx == ACTION_SETTINGS_OFFSET + 0) { audioApp.performFullScan(); loadAlbumIndex(); currentState = UI_PLAYER; UIManager::drawBaseUI(); }
+                    else if (enterIdx == ACTION_SETTINGS_OFFSET + 1) { ConfigManager::exportToSD(); currentState = UI_PLAYER; UIManager::drawBaseUI(); }
+                    else if (enterIdx == ACTION_SETTINGS_OFFSET + 2) { ConfigManager::importFromSD(); currentState = UI_PLAYER; UIManager::drawBaseUI(); }
                 }
                 break;
 
@@ -3551,6 +3595,7 @@ void loop() {
                 }
                 break;
 
+#ifdef ENABLE_WIFI
             case UI_WIFI_SCAN:
                 if (M5Cardputer.Keyboard.isKeyPressed('`')) { currentState = UI_SETTINGS; UIManager::drawSettings(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
@@ -3574,20 +3619,21 @@ void loop() {
             case UI_TEXT_INPUT:
                 {
                 auto status = M5Cardputer.Keyboard.keysState(); bool redraw = false;
-                if (status.del && enteredText.length() > 0) { enteredText.remove(enteredText.length() - 1); redraw = true; } 
+                if (status.del && enteredText.length() > 0) { enteredText.remove(enteredText.length() - 1); redraw = true; }
                 else if (status.enter) {
-                    if (textInputTarget == 0) { userSettings.wifiPass = enteredText; userSettings.wifiEnabled = true; ConfigManager::save(); ESP.restart(); } 
-                    else if (textInputTarget == 1) { userSettings.apSSID = enteredText; textInputTarget = 2; enteredText = userSettings.apPass; redraw = true; } 
+                    if (textInputTarget == 0) { userSettings.wifiPass = enteredText; userSettings.wifiEnabled = true; ConfigManager::save(); ESP.restart(); }
+                    else if (textInputTarget == 1) { userSettings.apSSID = enteredText; textInputTarget = 2; enteredText = userSettings.apPass; redraw = true; }
                     else if (textInputTarget == 2) {
-                        if (enteredText.length() < 8) { M5Cardputer.Display.setCursor(15, HEADER_HEIGHT + 65); M5Cardputer.Display.setTextColor(TFT_RED); M5Cardputer.Display.print("Must be 8+ chars!"); delay(1000); redraw = true; } 
+                        if (enteredText.length() < 8) { M5Cardputer.Display.setCursor(15, HEADER_HEIGHT + 65); M5Cardputer.Display.setTextColor(TFT_RED); M5Cardputer.Display.print("Must be 8+ chars!"); delay(1000); redraw = true; }
                         else { userSettings.apPass = enteredText; userSettings.isAPMode = true; userSettings.wifiEnabled = true; ConfigManager::save(); ESP.restart(); }
                     }
-                } 
-                else if (M5Cardputer.Keyboard.isKeyPressed('`')) { currentState = UI_SETTINGS; UIManager::drawSettings(); } 
+                }
+                else if (M5Cardputer.Keyboard.isKeyPressed('`')) { currentState = UI_SETTINGS; UIManager::drawSettings(); }
                 else { for (char c : status.word) { enteredText += c; redraw = true; } }
                 if (redraw) UIManager::drawTextInput();
                 }
                 break;
+#endif
 
             // --------------------------------------------------
             // SEARCH STATE
