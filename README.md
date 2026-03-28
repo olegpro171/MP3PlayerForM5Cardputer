@@ -1,145 +1,194 @@
-# M5Cardputer MP3 Player 🎵
+# M5Cardputer Music Player
 
-A fully featured, standalone MP3 player designed specifically for the **M5Stack Cardputer**. This application turns your Cardputer into a pocket-sized music station with a graphical interface, audio visualizer, playlist management, and keyboard controls.
+A feature-rich portable music player for the **M5Stack Cardputer** (ESP32-S3). Supports MP3, FLAC, AAC, and WAV playback from SD card, with album-based browsing, audio visualizers, Wi-Fi streaming, and a full settings system.
 
+Based on [SanchitMinda's MP3PlayerForM5Cardputer](https://github.com/sanchitminda/MP3PlayerForM5Cardputer) with significant UX improvements.
 
-## ✨ Features
+## Note from author
 
-* **🖥️ Graphical User Interface:**
-    * **Split-Screen Layout:** Scrollable playlist on the left, "Now Playing" details on the right.
-    * **Album Art / Metadata:** Displays Song Title and Artist from ID3 tags.
-    * **Progress Bar:** Real-time seeking bar showing track progress.
-    * **Audio Visualizer:** FFT-based frequency bars that dance to the music (can be toggled to save battery).
+> I would like to say thank you to the original author of this project: [Sanchit Minda](https://github.com/sanchitminda). None of this would have been possible without his work. 
 
-* **🎧 Advanced Playback Controls:**
-    * **Play/Pause/Stop:** Standard media controls.
-    * **Next/Previous:** Skip tracks easily.
-    * **Fast Forward / Rewind:** Jump +/- 5 seconds using `/` and `,`.
-    * **Shuffle Mode:** Randomize your playlist.
-    * **Loop Modes:** Toggle between `1X` (No Loop), `ALL` (Loop All), and `ONE` (Loop Song).
+## What's New in This Fork
 
-* **💾 Smart Library Management:**
-    * **Fast Startup:** Scans the SD card once and caches the playlist to a file (`playlist.txt`). Subsequent boots are instant.
-    * **Recursive Scanning:** Finds MP3s in root and subfolders.
-    * **Rescan Option:** Built-in menu to manually refresh the library if you add new songs.
+This fork restructures the player around **album-based navigation** and improves the overall experience for listening to full albums on the Cardputer's small screen.
 
-* **ℹ️ On-Device Help:**
-    * Press `I` to open a scrollable Help popup listing all keyboard shortcuts.
- 
-* **Memory-Optimized Playback:** Scans and indexes SD card directories using byte offsets, allowing for massive playlists without running out of RAM.
-  
-* **Web Streamer (NAS Mode):** Connect to an existing Wi-Fi network or spin up a standalone Access Point (Host Mode). Access a clean Web UI from your phone or PC to stream or download MP3s directly from the Cardputer.
+### Album Browsing with Artist Groups
 
-* **Smart Power Management:** * **Power Saver Modes:** Dynamically underclocks the CPU when Wi-Fi is off. Choose between Basic (160MHz) or Ultra (80MHz) to massively extend battery life.
+The original player showed a flat list of all songs. This fork replaces that with an **album browser grouped by artist**:
 
-* **Display Sleep:** Automatically powers down the LCD controller chip during screen timeouts.
+- The sidebar shows artists as collapsible headers with their albums indented below
+- Press Enter on an artist to expand/collapse, Enter on an album to see its tracks
+- Tracks are sorted by track number from ID3 tags, not by filename
+- Album-scoped playback: next/prev stays within the album instead of jumping to random files
+- When an album finishes (no loop), it pauses on the first track instead of stopping silently
 
-* **Pocket Mode:** Control playback without looking at the screen using the Cardputer's Button A (G0) click combinations.
-## 🛠️ Hardware Requirements
+All metadata (artist, album, track number, duration) is read from ID3v2/v1, FLAC Vorbis comments, and M4A/AAC atoms during a one-time library scan and cached to SD card.
 
-* **M5Stack Cardputer** (ESP32-S3 based)
-* **MicroSD Card** (Formatted to FAT32)
-* MP3 Files
+### Accurate Time Display
 
-## 📦 Software & Libraries
+The original player used a hardcoded bytes-per-second constant for time calculations, which showed incorrect durations for most files. This fork **pre-calculates track duration** during the library scan by reading:
 
-This project is built using the **Arduino IDE**. You need to install the following libraries via the Arduino Library Manager:
+- MP3: Xing/Info VBR header frame count, with CBR bitrate fallback
+- FLAC: STREAMINFO total samples / sample rate
+- M4A/AAC: mvhd atom duration / timescale
+- WAV: fmt chunk byte rate
 
-1.  **M5Cardputer** (by M5Stack)
-2.  **M5Unified** (by M5Stack)
-3.  **ESP8266Audio** (by Earle F. Philhower, III) - *Required for MP3 decoding.*
+Elapsed time is computed as `duration * (bytesPlayed / totalAudioBytes)`, accounting for metadata header offsets. No drift, no float accumulation, survives seek and pause perfectly.
 
-> **Note:** No external JSON library is required. The caching system uses standard file I/O to keep dependencies light.
+### Smarter Search
 
-## 🚀 Installation
+Search now supports **multi-token matching against ID3 tags**. Typing "li fa" finds "Linkin Park - Faint" because "li" matches the artist and "fa" matches the title. The search index includes artist, title, album, and file path, so you can also search by folder name or any combination.
 
-1.  **Prepare the SD Card:**
-    * Format your MicroSD card to **FAT32**.
-    * Copy your `.mp3` files onto the card. You can place them in the root directory or organize them into folders.
-    * Insert the SD card into the Cardputer.
+### Better State Persistence
 
-2.  **Setup Arduino IDE:**
-    * Open Arduino IDE.
-    * Go to **Tools > Board** and select **M5Stack Cardputer** (or `M5Stack-STAMPS3` if Cardputer isn't listed, but ensure pin definitions match).
-    * Install the required libraries listed above.
+- **Volume** is now saved and restored on boot (it wasn't before)
+- **Song position** is saved reliably on every song change, not just on pause
+- The original had a bug where the save guard `if(currentPos > 0)` silently skipped saving when a song started from position 0 (every normal play). Fixed.
 
-3.  **Flash the Code:**
-    * Copy the source code into a new sketch.
-    * Connect your Cardputer via USB-C.
-    * Click **Upload**.
+### Additional Improvements
 
-## 🎮 Controls
+- **Track info popup (T key)**: Shows full title, artist, and album in a popup overlay for text that doesn't fit in the small now-playing area
+- **Play/Pause key (P)**: Dedicated keyboard shortcut alongside the existing Button A
+- **Expand/Collapse all (E/Q)**: Quickly expand or collapse all artist groups in the sidebar
+- **Splash screen toggle**: New setting to skip the 3-second boot animation for instant startup
+- **Factory reset (hold Esc on boot)**: Erases all NVS settings to recover from corrupted config
+- **Settings validation**: All settings are bounds-checked on load to prevent crashes from corrupted NVS values
+- **Now Playing visualizer**: New text-only visualizer mode showing artist, album, and time without the animated art, giving more space for text
+- **Visualizer renders when paused**: Info visualizer mode (Now Playing tags with no extra graphics), stays visible during pause instead of going blank
 
-| Key | Function | Description |
-| :--- | :--- | :--- |
-| **Enter** | Play / Pause Selected
-| **; / .** |  Scroll Playlist Up / Down | Scrolls Up / Down playlist or Menu if Help/Menu is open. |
-| **`[` / `]`** |  Volume - / + | Decrease or Increases Volume. 
-| **N / B** |  Next / Previous Song  | Go back to the previous or next song. |
-| **`/ / ,** |  Seek Forward 5s / Seek Backward 5s | 
-| **S** | Toggle Shuffle | Toggle Shuffle mode On/Off. |
-| **L** | Toggle Loop Mode (All / One / None) | Cycle: 1X (No Loop) -> ALL (Loop All) -> ONE (Loop Song). |
-| **V** | Toggle Visualizer | Toggle the audio visualizer bars On/Off. |
-| **Esc** | Open Settings Menu | Open the System Menu (Rescan SD Card). |
-| **I** | Open Help Menu | Open/Close the Help Shortcut popup. |
+### Removed
+
+- **Folder/playlist system**: The original let you filter songs by folder. Since albums are now the primary navigation, folder filtering was removed entirely.
+
+## Hardware Requirements
+
+- **M5Stack Cardputer** (ESP32-S3 based)
+- **MicroSD Card** (FAT32 formatted)
+- Audio files: MP3, FLAC, M4A/AAC, WAV
+
+## Installation
+
+1. **Prepare the SD Card:**
+   - Format to FAT32
+   - Copy music files to the card (root or subfolders, up to 3 levels deep)
+   - Insert into the Cardputer
+
+2. **Setup Arduino IDE:**
+   - Select board: **M5Stack Cardputer** (Tools > Board)
+   - Install libraries via Library Manager:
+     - M5Cardputer (by M5Stack)
+     - M5Unified (by M5Stack)
+     - ESP8266Audio v1.9.7+ (by Earle F. Philhower III)
+
+3. **Flash:**
+   - Open `MP3PlayerM5Cardputer.ino`
+   - Connect via USB-C, click Upload
+
+4. **First boot:**
+   - The player will scan the SD card and build the album index (takes a moment)
+   - Subsequent boots load from cache instantly
+
+## Controls
+
+### Main Player
+
+| Key | Function |
+|-----|----------|
+| **; / .** | Scroll through artists and albums |
+| **Enter** | Expand/collapse artist, or open album |
+| **P** | Play / Pause |
+| **N / B** | Next / Previous track |
+| **/ / ,** | Seek forward / backward |
+| **[ / ]** | Volume down / up |
+| **S** | Search (multi-token, searches tags) |
+| **F** | Toggle shuffle |
+| **L** | Loop mode: 1x (once) / LP (loop) / 1T (one track) |
+| **V** | Cycle visualizer mode |
+| **T** | Track info popup (full title/artist/album) |
+| **E / Q** | Expand all / Collapse all artists |
+| **I** | Controls & Help |
+| **Esc / `** | Settings |
+
+### Album Songs View
+
+| Key | Function |
+|-----|----------|
+| **; / .** | Scroll through tracks |
+| **Enter** | Play selected track |
+| **`** | Back to album list |
+
 ### Pocket Mode (Button A / G0)
 
-* **1 Click**: Play / Pause
-* **2 Clicks**: Next Song
-* **3 Clicks**: Previous Song
+- **1 click**: Play / Pause
+- **2 clicks**: Next track
+- **3 clicks**: Previous track
 
-*Note: Press any keyboard key to wake the screen if it has timed out.*
+Press any key to wake the screen after timeout.
 
-## 🌐 Web Server & Wi-Fi Setup
+### Factory Reset
 
-Press `M` to enter the Settings menu to configure Wi-Fi:
+Hold **Esc** while the device boots to erase all settings and restore defaults.
 
-1. **Wi-Fi Mode:** Toggle between `STA (Client)` to connect to your home router, or `AP (Host)` to broadcast a network directly from the Cardputer.
-2. **Setup Network:** Follow the on-screen prompts to scan for networks and enter passwords.
-3. **Toggle Wi-Fi Power:** Turn Wi-Fi `ON`. The device will restart and apply the settings.
-4. The IP address will be displayed on the screen header. Navigate to that IP on a device connected to the same network to access the Web UI.
+## Settings
 
-*(Note: Enabling Wi-Fi automatically forces the CPU to 240MHz for network stability, temporarily disabling Power Saver modes).*
+Accessible via Esc key. Navigate with ; / . and adjust with / / , keys.
 
-## 📂 File Structure
+- Brightness, Screen timeout, Resume on boot
+- DAC sample rate, Seek interval
+- Wi-Fi power, Wi-Fi mode (STA/AP), network setup
+- Power saver (OFF / 160MHz / 80MHz)
+- Theme (4 color themes), Visualizer mode (6 modes)
+- Splash screen toggle
+- Rescan library, Export/Import config to SD
 
-The application automatically creates a cache file on your SD card after the first scan.
+## Visualizer Modes
 
-```text
-/ (Root)
-├── Music_Folder/
-│   ├── Song1.mp3
-│   └── Song2.mp3
-├── Other_Song.mp3
-└── playlist.txt  <-- Created automatically by the app
+1. **Classic Bars** - FFT frequency bar graph
+2. **Waveform Line** - FFT waveform display
+3. **Circular Spikes** - FFT circular visualization
+4. **Art + Info** - Animated pixel art with artist, album, and time
+5. **Now Playing** - Text-only artist, album, and time (full width)
+6. **OFF** - No visualizer
+
+Modes 4 and 5 remain visible when playback is paused.
+
+## Wi-Fi / Web Streaming
+
+Enable Wi-Fi in settings to stream music from the Cardputer to any device on the network:
+
+1. Set Wi-Fi mode: STA (connect to router) or AP (broadcast own network)
+2. Configure network credentials
+3. Enable Wi-Fi power and restart
+4. The IP address appears in the header bar
+5. Navigate to that IP in a browser for the Web UI
+
+Wi-Fi forces 240MHz CPU for network stability, overriding power saver.
+
+## File Structure
+
 ```
-## ❓ Troubleshooting
+/ (SD Card Root)
++-- Music/
+|   +-- Artist - Song.mp3
+|   +-- Album Folder/
+|       +-- 01 Track.flac
++-- playlist.txt      (auto-generated song index)
++-- albums.idx        (auto-generated album index with artist groups)
++-- search.idx        (auto-generated search index with tags + durations)
+```
 
-* **"No MP3 Files Found":**
-    * Ensure the SD card is FAT32.
-    * Ensure files end in `.mp3` (or `.MP3`).
-    * Try pressing `M` then `1` to force a rescan.
-* **Audio Stuttering:**
-    * This can happen with very high bitrate files (320kbps+) or slow SD cards. The code is optimized for 128kbps - 192kbps MP3s.
-* **Compilation Errors:**
-    * Ensure you have installed `ESP8266Audio` version 1.9.7 or later.
-    * Refer to https://github.com/sanchitminda/MP3PlayerForM5Cardputer/issues/5 
+All index files are rebuilt when you select "Rescan Library" in settings.
 
-## 📜 License
+## Troubleshooting
 
-This project is open-source. Feel free to modify and improve it!
+- **No songs found**: Ensure SD card is FAT32. Supported formats: .mp3, .flac, .m4a, .aac, .wav
+- **Wrong time display**: Rescan the library (Settings > Rescan Library) to rebuild duration index
+- **Device won't boot**: Hold Esc during boot to factory reset settings
+- **Audio stuttering on Ultra power saver (80MHz)**: Switch to Basic (160MHz) or OFF
+- **Compilation errors**: Ensure ESP8266Audio v1.9.7+ is installed
 
-**Credits:**
-* Audio processing powered by the [ESP8266Audio Library](https://github.com/earlephilhower/ESP8266Audio).
-* UI and Hardware integration via M5Stack libraries.
-## 🐛 Known Issues / Notes
+## Credits
 
-* **Audio Stuttering:** If you experience audio stuttering while on `ULTRA (80MHz)` Power Saver mode, your MP3 bitrates may be too high for the underclocked CPU. Switch to `BASIC (160MHz)`.
-* **SD Card Limit:** The ESP32 requires file paths to start with a `/`. Ensure your SD card is clean and not corrupted.
-
-## 👨‍💻 Author
-
-Created by [Sanchit Minda](https://www.google.com/search?q=https://github.com/sanchitminda)
-
-If you like this project, feel free to star the repo and share your suggestions!
-
+- Original project by [Sanchit Minda](https://github.com/sanchitminda)
+- Audio processing by [ESP8266Audio Library](https://github.com/earlephilhower/ESP8266Audio)
+- UI and hardware integration via M5Stack libraries

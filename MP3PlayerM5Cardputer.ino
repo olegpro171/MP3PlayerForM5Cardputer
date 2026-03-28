@@ -117,14 +117,15 @@ const char* helpLines[] = {
   "Press any key to wake screen",
   "Hold Esc on boot: Reset",
   "--- ABOUT ---",
-  "Made with <3 by SaM",
-  "Sit back, relax, and",
-  "enjoy the music!",
+  "Fork of SaM player",
+  "made by Oleg Proshkin.",
+  "original author",
+  "Sanchit Minda.",
   "---",
   "GH: github.com/sanchitminda",
   "Share your suggestions!"
 };
-const int numHelpLines = 31;
+const int numHelpLines = 32;
 const int numSettings = 16;
 
 // ==========================================
