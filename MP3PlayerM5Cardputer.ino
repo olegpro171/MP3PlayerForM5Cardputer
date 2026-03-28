@@ -946,7 +946,7 @@ public:
         else decoder = new AudioGeneratorMP3();
         
         isPaused = false;
-        if (startPos == 0) lookupSongMeta(currentIndex);
+        lookupSongMeta(currentIndex);
         bool ok = decoder->begin(id3, out);
         if (ok) ConfigManager::save(startPos, currentIndex);
         return ok;
