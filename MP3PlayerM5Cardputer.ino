@@ -79,7 +79,7 @@ void applyTheme(int index) {
 }
 
 enum LoopState { NO_LOOP, LOOP_ALL, LOOP_ONE };
-enum UIState { UI_PLAYER, UI_SETTINGS, UI_HELP, UI_WIFI_SCAN, UI_TEXT_INPUT, UI_FOLDER_SELECT, UI_SEARCH, UI_ALBUM_SONGS };
+enum UIState { UI_PLAYER, UI_SETTINGS, UI_HELP, UI_WIFI_SCAN, UI_TEXT_INPUT, UI_SEARCH, UI_ALBUM_SONGS };
 
 const uint32_t sampleRateValues[] = { 44100, 48000, 88200, 96000, 128000 };
 const char* sampleRateLabels[] = { "44.1k", "48k", "88.2k", "96k", "128k" };
@@ -117,7 +117,7 @@ const char* helpLines[] = {
   "Share your suggestions!"
 };
 const int numHelpLines = 28;
-const int numSettings = 17;
+const int numSettings = 16;
 
 // ==========================================
 // GLOBALS
@@ -139,7 +139,6 @@ struct Settings {
     String apPass = "12345678";    
     int powerSaverMode = 0;        
     int seek = 0;
-    String currentFolder = "";    // "" = All Music; "/FolderName" = specific folder
     int volume = 128;
     bool showSplash = true;
 };
@@ -157,8 +156,6 @@ bool isScreenOff = false;
 int textInputTarget = 0; // 0=STA Pass, 1=AP SSID, 2=AP Pass
 String enteredText = "";
 
-// Active playlist path (changes when user picks a folder)
-String g_activePlaylist = PLAYLIST_FILE;
 
 // Search globals
 String g_searchQuery = "";
@@ -263,7 +260,6 @@ public:
         userSettings.themeIndex = preferences.getInt("themeIndex", 0);
         userSettings.visMode = preferences.getInt("visMode", 0);
         userSettings.seek = preferences.getInt("seek", 5);
-        userSettings.currentFolder = preferences.getString("curFolder", "");
         userSettings.volume = preferences.getInt("volume", 128);
         userSettings.showSplash = preferences.getBool("showSplash", true);
         preferences.end();
@@ -291,7 +287,6 @@ public:
         preferences.putInt("themeIndex", userSettings.themeIndex);
         preferences.putInt("visMode", userSettings.visMode);
         preferences.putInt("seek", userSettings.seek);
-        preferences.putString("curFolder", userSettings.currentFolder);
         preferences.putInt("volume", userSettings.volume);
         preferences.putBool("showSplash", userSettings.showSplash);
         preferences.end();
@@ -308,7 +303,7 @@ public:
             file.println(userSettings.wifiPass); file.println(userSettings.isAPMode ? 1 : 0);
             file.println(userSettings.apSSID); file.println(userSettings.apPass);
             file.println(userSettings.powerSaverMode); file.println(userSettings.seek);
-            file.println(userSettings.currentFolder); file.println(userSettings.volume);
+            file.println(userSettings.volume);
             file.println(userSettings.showSplash ? 1 : 0); file.close();
             
             M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
@@ -337,7 +332,6 @@ public:
             if(file.available()) { userSettings.apPass = file.readStringUntil('\n'); userSettings.apPass.trim(); }
             if(file.available()) userSettings.powerSaverMode = file.readStringUntil('\n').toInt();
             if(file.available()) userSettings.seek = file.readStringUntil('\n').toInt();
-            if(file.available()) { userSettings.currentFolder = file.readStringUntil('\n'); userSettings.currentFolder.trim(); }
             if(file.available()) userSettings.volume = file.readStringUntil('\n').toInt();
             if(file.available()) userSettings.showSplash = (file.readStringUntil('\n').toInt() == 1);
             file.close();
@@ -352,21 +346,6 @@ void applyCpuFrequency() {
     if (userSettings.wifiEnabled || userSettings.powerSaverMode == 0) setCpuFrequencyMhz(240); 
     else if (userSettings.powerSaverMode == 1) setCpuFrequencyMhz(160); 
     else setCpuFrequencyMhz(80); 
-}
-
-// ==========================================
-// PLAYLIST HELPERS
-// ==========================================
-// Returns the cache file path for a given folder.
-// "" or "/" => the flat "All Music" cache at PLAYLIST_FILE
-// "/Rock"   => "/pl_Rock.txt"
-// "/A/B"    => "/pl_A_B.txt"
-String getPlaylistPath(const String& folder) {
-    if (folder == "" || folder == "/") return String(PLAYLIST_FILE);
-    String safe = folder;
-    if (safe.startsWith("/")) safe = safe.substring(1);
-    safe.replace("/", "_");
-    return "/pl_" + safe + ".txt";
 }
 
 // ==========================================
@@ -777,52 +756,13 @@ public:
         }
         if (rawAlbumFile) rawAlbumFile.close();
         buildAlbumIndex();
-        g_activePlaylist = PLAYLIST_FILE;
-        userSettings.currentFolder = "";
         loadPlaylist();
-    }
-
-    // Scan a specific folder and cache it, then load.
-    // folder == "" means "All Music" → delegates to performFullScan.
-    void performFolderScan(const String& folder) {
-        if (folder == "" || folder == "/") { performFullScan(); return; }
-        stop(); songOffsets.clear();
-        M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.println("Scanning folder...");
-        M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.println(folder);
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
-
-        String cachePath = getPlaylistPath(folder);
-        if (SD.exists(cachePath)) SD.remove(cachePath);
-        File playlistFile = SD.open(cachePath, FILE_WRITE);
-        if (playlistFile) {
-            listDir(SD, folder.c_str(), 3, playlistFile);
-            playlistFile.close();
-        }
-        g_activePlaylist = cachePath;
-        userSettings.currentFolder = folder;
-        loadPlaylist();
-    }
-
-    // Load (or auto-scan) the playlist for a given folder.
-    // Returns false if no songs found.
-    bool loadPlaylistForFolder(const String& folder) {
-        String cachePath = getPlaylistPath(folder);
-        g_activePlaylist = cachePath;
-        userSettings.currentFolder = (folder == "/" ? "" : folder);
-
-        if (!SD.exists(cachePath)) {
-            // Cache missing → build it now
-            performFolderScan(folder == "" ? "/" : folder);
-            return (songOffsets.size() > 0);
-        }
-        return loadPlaylist();
     }
 
     bool loadPlaylist() {
         songOffsets.clear();
-        if (!SD.exists(g_activePlaylist)) return false;
-        File f = SD.open(g_activePlaylist);
+        if (!SD.exists(PLAYLIST_FILE)) return false;
+        File f = SD.open(PLAYLIST_FILE);
         if (!f) return false;
         while (f.available()) {
             uint32_t pos = f.position(); 
@@ -834,7 +774,7 @@ public:
 
     String getSongPath(int index) {
         if (index < 0 || (size_t)index >= songOffsets.size()) return "";
-        File f = SD.open(g_activePlaylist); f.seek(songOffsets[index]); String path = f.readStringUntil('\n'); f.close();
+        File f = SD.open(PLAYLIST_FILE); f.seek(songOffsets[index]); String path = f.readStringUntil('\n'); f.close();
         path.trim(); if (path.length() > 0 && !path.startsWith("/")) path = "/" + path;
         return path;
     }
@@ -941,33 +881,13 @@ public:
         }
     }
 
-    // Scan root for top-level directories. Returns list including "" (All Music).
-    std::vector<String> listRootFolders() {
-        std::vector<String> folders;
-        folders.push_back("");   // index 0 = "All Music"
-        File root = SD.open("/");
-        if (!root || !root.isDirectory()) return folders;
-        File entry = root.openNextFile();
-        while (entry) {
-            if (entry.isDirectory()) {
-                String dname = entry.name();
-                if (!dname.startsWith(".")) {
-                    String path = entry.path();
-                    folders.push_back(path);
-                }
-            }
-            entry = root.openNextFile();
-        }
-        root.close();
-        return folders;
-    }
 };
 
 AudioEngine audioApp;
 
 // Find a file path in the global songOffsets playlist. Returns index or -1.
 int findSongInPlaylist(const String& targetPath) {
-    File f = SD.open(g_activePlaylist);
+    File f = SD.open(PLAYLIST_FILE);
     if (!f) return -1;
     for (size_t i = 0; i < audioApp.songOffsets.size(); i++) {
         f.seek(audioApp.songOffsets[i]);
@@ -992,10 +912,6 @@ public:
     static int wifiNetworkCount;
     static int helpScrollOffset;
 
-    // Folder browser state
-    static std::vector<String> folderList;
-    static int folderCursor;
-    static int folderScrollOffset;
 
     // -----------------------------------------------
     // SEARCH UI
@@ -1006,7 +922,7 @@ public:
         g_searchScrollOffset = 0;
         if (g_searchQuery.length() == 0) return;
         String queryLower = g_searchQuery; queryLower.toLowerCase();
-        File f = SD.open(g_activePlaylist);
+        File f = SD.open(PLAYLIST_FILE);
         if (!f) return;
         int idx = 0;
         while (f.available()) {
@@ -1517,111 +1433,9 @@ public:
                 case 12: M5Cardputer.Display.print("[ RESCAN LIBRARY ]"); break;    
                 case 13: M5Cardputer.Display.print("[ EXPORT CONFIG TO SD ]"); break; 
                 case 14: M5Cardputer.Display.print("[ IMPORT FROM SD ]"); break;
-                case 15: {
-                    String flabel = userSettings.currentFolder == "" ? "All Music" : userSettings.currentFolder;
-                    if (flabel.startsWith("/")) flabel = flabel.substring(1);
-                    if (flabel.length() > 12) flabel = flabel.substring(0, 12) + "~";
-                    M5Cardputer.Display.printf("Playlist: %s", flabel.c_str()); break;
-                }
-                case 16: M5Cardputer.Display.printf("Splash Screen: %s", userSettings.showSplash ? "ON" : "OFF"); break;
+                case 15: M5Cardputer.Display.printf("Splash Screen: %s", userSettings.showSplash ? "ON" : "OFF"); break;
             }
         }
-    }
-
-    // -----------------------------------------------
-    // FOLDER BROWSER (UI_FOLDER_SELECT)
-    // -----------------------------------------------
-    static void buildFolderList() {
-        folderList = audioApp.listRootFolders();
-        folderCursor = 0;
-        folderScrollOffset = 0;
-        // Pre-select current folder
-        for (int i = 0; i < (int)folderList.size(); i++) {
-            if (folderList[i] == userSettings.currentFolder) { folderCursor = i; break; }
-        }
-        if (folderCursor >= (int)folderList.size()) folderCursor = 0;
-        // Adjust scroll
-        if (folderCursor >= folderScrollOffset + MAX_VISIBLE_ROWS)
-            folderScrollOffset = folderCursor - MAX_VISIBLE_ROWS + 1;
-    }
-
-    static void drawFolderSelect() {
-        M5Cardputer.Display.fillScreen(C_BG_DARK);
-        // Header
-        M5Cardputer.Display.fillRect(0, 0, M5Cardputer.Display.width(), HEADER_HEIGHT, C_HEADER);
-        M5Cardputer.Display.setFont(&fonts::Font0);
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN, C_HEADER);
-        M5Cardputer.Display.setCursor(5, 5);
-        M5Cardputer.Display.print("Select Playlist / Folder");
-
-        int yPos = HEADER_HEIGHT + 4;
-        int totalFolders = folderList.size();
-
-        if (totalFolders == 0) {
-            M5Cardputer.Display.setCursor(10, yPos);
-            M5Cardputer.Display.setTextColor(C_TEXT_DIM);
-            M5Cardputer.Display.print("No folders found.");
-        } else {
-            for (int i = 0; i < MAX_VISIBLE_ROWS; i++) {
-                int idx = folderScrollOffset + i;
-                if (idx >= totalFolders) break;
-
-                bool isSelected = (idx == folderCursor);
-                bool isCurrent  = (folderList[idx] == userSettings.currentFolder);
-
-                if (isSelected) {
-                    M5Cardputer.Display.fillRect(2, yPos - 1, M5Cardputer.Display.width() - 4, ROW_HEIGHT, C_ACCENT);
-                    M5Cardputer.Display.setTextColor(C_BG_DARK);
-                } else if (isCurrent) {
-                    M5Cardputer.Display.setTextColor(C_PLAYING);
-                } else {
-                    M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
-                }
-
-                M5Cardputer.Display.setCursor(8, yPos + 2);
-
-                // Show cache status badge
-                String cachePath = getPlaylistPath(folderList[idx]);
-                bool hasCached = SD.exists(cachePath);
-
-                String label;
-                if (folderList[idx] == "") {
-                    label = "[All Music]";
-                } else {
-                    label = folderList[idx];
-                    if (label.startsWith("/")) label = label.substring(1);
-                }
-                if (label.length() > 20) label = label.substring(0, 20) + "~";
-
-                M5Cardputer.Display.print(label);
-
-                // Cache indicator on the right
-                M5Cardputer.Display.setCursor(M5Cardputer.Display.width() - 18, yPos + 2);
-                if (hasCached) {
-                    M5Cardputer.Display.setTextColor(isSelected ? C_BG_DARK : C_PLAYING);
-                    M5Cardputer.Display.print("*");
-                } else {
-                    M5Cardputer.Display.setTextColor(isSelected ? C_BG_DARK : C_TEXT_DIM);
-                    M5Cardputer.Display.print("?");
-                }
-
-                yPos += ROW_HEIGHT;
-            }
-
-            // Scroll arrows
-            M5Cardputer.Display.setTextColor(C_ACCENT);
-            if (folderScrollOffset > 0)
-                M5Cardputer.Display.drawString("^", M5Cardputer.Display.width() - 10, HEADER_HEIGHT + 4);
-            if (folderScrollOffset + MAX_VISIBLE_ROWS < totalFolders)
-                M5Cardputer.Display.drawString("v", M5Cardputer.Display.width() - 10, HEADER_HEIGHT + (MAX_VISIBLE_ROWS * ROW_HEIGHT) - 6);
-        }
-
-        // Footer
-        int footerY = M5Cardputer.Display.height() - BOTTOM_BAR_HEIGHT;
-        M5Cardputer.Display.fillRect(0, footerY, M5Cardputer.Display.width(), BOTTOM_BAR_HEIGHT, C_HEADER);
-        M5Cardputer.Display.setTextColor(C_TEXT_DIM, C_HEADER);
-        M5Cardputer.Display.setCursor(5, footerY + 4);
-        M5Cardputer.Display.print("Enter:Load  R:Rescan  `:Back");
     }
 
     static void drawWifiScanner() {
@@ -1663,9 +1477,6 @@ public:
 int UIManager::settingsCursor = 0; int UIManager::menuScrollOffset = 0; bool UIManager::showVisualizer = true;
 int UIManager::wifiCursor = 0; int UIManager::wifiScrollOffset = 0; int UIManager::wifiNetworkCount = 0;
 int UIManager::helpScrollOffset = 0;
-std::vector<String> UIManager::folderList;
-int UIManager::folderCursor = 0;
-int UIManager::folderScrollOffset = 0;
 
 void AudioEngine::MDCallback(void *cbData, const char *type, bool isUnicode, const char *string) {
     if (string[0] == 0) return;
@@ -1757,9 +1568,9 @@ player.addEventListener('ended',playNext);
         });
 
         server.on("/api/songs", []() {
-            if (!SD.exists(g_activePlaylist)) { server.send(500, "text/plain", "No Playlist"); return; }
+            if (!SD.exists(PLAYLIST_FILE)) { server.send(500, "text/plain", "No Playlist"); return; }
             server.setContentLength(CONTENT_LENGTH_UNKNOWN); server.send(200, "application/json", ""); server.sendContent("[\n");
-            File f = SD.open(g_activePlaylist); String jsonBuffer = ""; bool first = true;
+            File f = SD.open(PLAYLIST_FILE); String jsonBuffer = ""; bool first = true;
             while (f.available()) {
                 String line = f.readStringUntil('\n'); line.trim(); int slashIdx = line.lastIndexOf('/'); if (slashIdx >= 0) line = line.substring(slashIdx + 1);
                 line.replace("\"", "\\\"");
@@ -2627,9 +2438,6 @@ void setup() {
     out->begin();
     M5Cardputer.Speaker.setVolume(userSettings.volume);
 
-    // Restore g_activePlaylist from saved currentFolder
-    g_activePlaylist = getPlaylistPath(userSettings.currentFolder);
-
     if (audioApp.loadPlaylist()) {
         if (userSettings.resumePlay && userSettings.lastIndex < (int)audioApp.songOffsets.size())
             audioApp.play(userSettings.lastIndex, userSettings.lastPos);
@@ -2763,7 +2571,7 @@ void loop() {
                             userSettings.visMode = (userSettings.visMode + (right?1:-1) + NUM_VIS_MODES) % NUM_VIS_MODES;
                             UIManager::drawBaseUI();
                             break;
-                        case 16: userSettings.showSplash = !userSettings.showSplash; break;
+                        case 15: userSettings.showSplash = !userSettings.showSplash; break;
                     }
                     UIManager::drawSettings();
                 }
@@ -2779,11 +2587,6 @@ void loop() {
                         case 12: audioApp.performFullScan(); loadAlbumIndex(); currentState = UI_PLAYER; UIManager::drawBaseUI(); break;
                         case 13: ConfigManager::exportToSD(); currentState = UI_PLAYER; UIManager::drawBaseUI(); break;
                         case 14: ConfigManager::importFromSD(); currentState = UI_PLAYER; UIManager::drawBaseUI(); break;
-                        case 15: // Playlist / Folder Selector
-                            UIManager::buildFolderList();
-                            currentState = UI_FOLDER_SELECT;
-                            UIManager::drawFolderSelect();
-                            break;
                     }
                 }
                 break;
@@ -2884,66 +2687,6 @@ void loop() {
                     if (redraw) UIManager::rebuildSearchResults();
                 }
                 if (redraw && currentState == UI_SEARCH) UIManager::drawSearch();
-                }
-                break;
-
-            // --------------------------------------------------
-            // FOLDER SELECT STATE
-            // --------------------------------------------------
-            case UI_FOLDER_SELECT:
-                if (M5Cardputer.Keyboard.isKeyPressed('`')) {
-                    // Back to settings without changing playlist
-                    currentState = UI_SETTINGS;
-                    UIManager::drawSettings();
-                }
-                else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
-                    // Scroll up
-                    UIManager::folderCursor--;
-                    if (UIManager::folderCursor < 0) UIManager::folderCursor = (int)UIManager::folderList.size() - 1;
-                    if (UIManager::folderCursor < UIManager::folderScrollOffset)
-                        UIManager::folderScrollOffset = UIManager::folderCursor;
-                    if (UIManager::folderCursor == (int)UIManager::folderList.size() - 1)
-                        UIManager::folderScrollOffset = max(0, (int)UIManager::folderList.size() - MAX_VISIBLE_ROWS);
-                    UIManager::drawFolderSelect();
-                }
-                else if (M5Cardputer.Keyboard.isKeyPressed('.')) {
-                    // Scroll down
-                    UIManager::folderCursor++;
-                    if (UIManager::folderCursor >= (int)UIManager::folderList.size()) { UIManager::folderCursor = 0; UIManager::folderScrollOffset = 0; }
-                    if (UIManager::folderCursor >= UIManager::folderScrollOffset + MAX_VISIBLE_ROWS)
-                        UIManager::folderScrollOffset++;
-                    UIManager::drawFolderSelect();
-                }
-                else if (M5Cardputer.Keyboard.isKeyPressed('r')) {
-                    // Force-rescan selected folder (delete cache first)
-                    String selectedFolder = UIManager::folderList[UIManager::folderCursor];
-                    String cachePath = getPlaylistPath(selectedFolder);
-                    if (SD.exists(cachePath)) SD.remove(cachePath);
-                    audioApp.performFolderScan(selectedFolder == "" ? "/" : selectedFolder);
-                    loadAlbumIndex(); // Reload album index after rescan
-                    ConfigManager::save();
-                    // Rebuild folder list to refresh cache indicators
-                    UIManager::buildFolderList();
-                    UIManager::drawFolderSelect();
-                }
-                else if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
-                    // Load selected folder's playlist
-                    String selectedFolder = UIManager::folderList[UIManager::folderCursor];
-                    bool ok = audioApp.loadPlaylistForFolder(selectedFolder);
-                    g_albumPlaybackActive = false; // Exit album-scoped playback
-                    ConfigManager::save();
-                    currentState = UI_PLAYER;
-                    if (ok && audioApp.songOffsets.size() > 0) {
-                        audioApp.play(0);
-                    } else {
-                        // Empty or failed — show brief message
-                        M5Cardputer.Display.fillScreen(C_BG_DARK);
-                        M5Cardputer.Display.setCursor(10, 40);
-                        M5Cardputer.Display.setTextColor(TFT_RED);
-                        M5Cardputer.Display.print("No songs found!");
-                        delay(1500);
-                    }
-                    UIManager::drawBaseUI();
                 }
                 break;
 
