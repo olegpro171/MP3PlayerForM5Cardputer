@@ -36,7 +36,6 @@
 #define SD_SPI_MOSI_PIN 14
 #define SD_SPI_CS_PIN   12
 #define PLAYLIST_FILE   "/playlist.txt"   // "All Music" flat cache
-#define CONFIG_FILE     "/config.txt"
 #define ALBUM_INDEX_FILE "/albums.idx"
 #define ALBUM_RAW_FILE   "/albums_raw.tmp"
 #define SEARCH_INDEX_FILE "/search.idx"
@@ -348,8 +347,10 @@ enum UIState { UI_PLAYER, UI_SETTINGS, UI_HELP, UI_WIFI_SCAN, UI_TEXT_INPUT, UI_
 
 const uint32_t sampleRateValues[] = { 44100, 48000, 88200, 96000, 128000 };
 const char* sampleRateLabels[] = { "44.1k", "48k", "88.2k", "96k", "128k" };
-const long timeoutValues[] = { 0, 30000, 60000, 120000, 300000 };
-const char* timeoutLabels[] = { "Always On", "30 Sec", "1 Min", "2 Min", "5 Min" };
+const long timeoutValues[] = { 15000, 30000, 60000, 120000, 300000, 900000 };
+const char* timeoutLabels[] = { "15 Sec", "30 Sec", "1 Min", "2 Min", "5 Min", "15 Min" };
+const int brightnessValues[] = { 5, 40, 80, 140, 255 };
+const char* brightnessLabels[] = { "2%", "25%", "50%", "75%", "100%" };
 const char* powerModeLabels[] = { "OFF", "BASIC (160)", "ULTRA (80)" };
 const char* helpLines[] = {
   "--- MUSIC PLAYER ---",
@@ -389,21 +390,28 @@ const char* helpLines[] = {
 };
 const int numHelpLines = 34;
 // Settings menu layout: cases 0-3 are common, then Wi-Fi cases (if enabled), then the rest
+// Settings menu layout
+// 0: Brightness, 1: Screen Time-Out, 2: Power Saving, 3: Theme,
+// 4: Boot Animation, 5: Rewind Speed, 6: Sample Rate
+// [Wi-Fi: 7: Wi-Fi Power, 8: Wi-Fi Mode, 9: Setup Network, 10: Setup AP]
+// Last: Update Library
 #ifdef ENABLE_WIFI
-#define WIFI_SETTINGS_OFFSET 6   // after 4=Wi-Fi Power, 5=Wi-Fi Mode
-#define ACTION_SETTINGS_OFFSET 11 // after Wi-Fi setup entries
-const int numSettings = 15;
+const int numSettings = 12;
+#define IDX_WIFI_POWER 7
+#define IDX_WIFI_MODE 8
+#define IDX_WIFI_SETUP 9
+#define IDX_WIFI_AP 10
+#define IDX_UPDATE_LIB 11
 #else
-#define WIFI_SETTINGS_OFFSET 4   // no Wi-Fi entries
-#define ACTION_SETTINGS_OFFSET 7  // no Wi-Fi setup entries
-const int numSettings = 11;
+const int numSettings = 8;
+#define IDX_UPDATE_LIB 7
 #endif
 
 // ==========================================
 // GLOBALS
 // ==========================================
 struct Settings {
-    int brightness = 100;      
+    int brightnessIndex = 4;   // index into brightnessValues/Labels (default 100%)      
     int themeIndex = 0;
     int visMode = 0;
     int timeoutIndex = 0;      
@@ -627,7 +635,7 @@ class ConfigManager {
 public:
     static void load() {
         preferences.begin("sam_music", true);
-        userSettings.brightness = preferences.getInt("brightness", 100);
+        userSettings.brightnessIndex = preferences.getInt("brightIdx", 4);
         userSettings.timeoutIndex = preferences.getInt("timeoutIndex", 0);
         userSettings.spkRateIndex = preferences.getInt("spkRate", 4);
         userSettings.lastIndex = preferences.getInt("lastIndex", 0);
@@ -650,8 +658,8 @@ public:
         preferences.end();
 
         // Validate all settings to prevent crashes from corrupted NVS
-        userSettings.brightness = constrain(userSettings.brightness, 5, 255);
-        userSettings.timeoutIndex = constrain(userSettings.timeoutIndex, 0, 4);
+        userSettings.brightnessIndex = constrain(userSettings.brightnessIndex, 0, 4);
+        userSettings.timeoutIndex = constrain(userSettings.timeoutIndex, 0, 5);
         userSettings.spkRateIndex = constrain(userSettings.spkRateIndex, 0, 4);
         userSettings.powerSaverMode = constrain(userSettings.powerSaverMode, 0, 2);
         userSettings.themeIndex = constrain(userSettings.themeIndex, 0, NUM_THEMES - 1);
@@ -667,7 +675,7 @@ public:
     static void save(uint32_t currentPos = 0, int currentIndex = -1) {
         if(currentIndex >= 0) { userSettings.lastPos = currentPos; userSettings.lastIndex = currentIndex; }
         preferences.begin("sam_music", false);
-        preferences.putInt("brightness", userSettings.brightness);
+        preferences.putInt("brightIdx", userSettings.brightnessIndex);
         preferences.putInt("timeoutIndex", userSettings.timeoutIndex);
         preferences.putInt("spkRate", userSettings.spkRateIndex);
         preferences.putInt("lastIndex", userSettings.lastIndex);
@@ -690,58 +698,6 @@ public:
         preferences.end();
     }
 
-    static void exportToSD() {
-        if (SD.exists(CONFIG_FILE)) SD.remove(CONFIG_FILE);
-        File file = SD.open(CONFIG_FILE, FILE_WRITE);
-        if (file) {
-            file.println(userSettings.brightness); file.println(userSettings.timeoutIndex);
-            file.println(userSettings.spkRateIndex);
-            file.println(userSettings.lastIndex); file.println(userSettings.lastPos);
-            file.println(userSettings.wifiEnabled ? 1 : 0); file.println(userSettings.wifiSSID);
-            file.println(userSettings.wifiPass); file.println(userSettings.isAPMode ? 1 : 0);
-            file.println(userSettings.apSSID); file.println(userSettings.apPass);
-            file.println(userSettings.powerSaverMode); file.println(userSettings.seek);
-            file.println(userSettings.volume);
-            file.println(userSettings.showSplash ? 1 : 0);
-            file.println(userSettings.lastAlbumIdx); file.println(userSettings.lastAlbumTrack);
-            file.println(userSettings.kbLayoutIndex); file.close();
-            
-            M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
-            M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("Exported to SD!"); delay(1000);
-        }
-    }
-
-    static void importFromSD() {
-        if (!SD.exists(CONFIG_FILE)) {
-            M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
-            M5Cardputer.Display.setTextColor(TFT_RED); M5Cardputer.Display.print("No config.txt found!"); delay(1000); return;
-        }
-        File file = SD.open(CONFIG_FILE);
-        if (file) {
-            if(file.available()) userSettings.brightness = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.timeoutIndex = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.spkRateIndex = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.lastIndex = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.lastPos = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.wifiEnabled = (file.readStringUntil('\n').toInt() == 1);
-            if(file.available()) { userSettings.wifiSSID = file.readStringUntil('\n'); userSettings.wifiSSID.trim(); }
-            if(file.available()) { userSettings.wifiPass = file.readStringUntil('\n'); userSettings.wifiPass.trim(); }
-            if(file.available()) userSettings.isAPMode = (file.readStringUntil('\n').toInt() == 1);
-            if(file.available()) { userSettings.apSSID = file.readStringUntil('\n'); userSettings.apSSID.trim(); }
-            if(file.available()) { userSettings.apPass = file.readStringUntil('\n'); userSettings.apPass.trim(); }
-            if(file.available()) userSettings.powerSaverMode = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.seek = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.volume = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.showSplash = (file.readStringUntil('\n').toInt() == 1);
-            if(file.available()) userSettings.lastAlbumIdx = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.lastAlbumTrack = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.kbLayoutIndex = file.readStringUntil('\n').toInt();
-            file.close();
-            save(); M5Cardputer.Display.setBrightness(userSettings.brightness);
-            M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
-            M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("Imported from SD!"); delay(1000);
-        }
-    }
 };
 
 void applyCpuFrequency() {
@@ -2295,28 +2251,23 @@ public:
         for (int i = 0; i < 4; i++) {
             int idx = menuScrollOffset + i; if (idx >= items) break;
             M5Cardputer.Display.setCursor(25, startY + (i * gap));
-            M5Cardputer.Display.setTextColor(idx == settingsCursor ? (idx == 4 ? TFT_RED : C_HIGHLIGHT) : C_TEXT_MAIN);
+            M5Cardputer.Display.setTextColor(idx == settingsCursor ? C_HIGHLIGHT : C_TEXT_MAIN);
 
             switch (idx) {
-                case 0: M5Cardputer.Display.printf("Brightness: %d", userSettings.brightness); break;
-                case 1: M5Cardputer.Display.printf("Screen Off: %s", timeoutLabels[userSettings.timeoutIndex]); break;
-                case 2: M5Cardputer.Display.printf("DAC Rate: %s", sampleRateLabels[userSettings.spkRateIndex]); break;
-                case 3: M5Cardputer.Display.printf("Seek Value: %d", userSettings.seek); break;
+                case 0: M5Cardputer.Display.printf("Brightness: %s", brightnessLabels[userSettings.brightnessIndex]); break;
+                case 1: M5Cardputer.Display.printf("Screen Time-Out: %s", timeoutLabels[userSettings.timeoutIndex]); break;
+                case 2: M5Cardputer.Display.printf("Power Saving: %s", powerModeLabels[userSettings.powerSaverMode]); break;
+                case 3: M5Cardputer.Display.printf("Theme: %s", themeLabels[userSettings.themeIndex]); break;
+                case 4: M5Cardputer.Display.printf("Boot Animation: %s", userSettings.showSplash ? "ON" : "OFF"); break;
+                case 5: M5Cardputer.Display.printf("Rewind Speed: %ds", userSettings.seek); break;
+                case 6: M5Cardputer.Display.printf("Sample Rate: %s", sampleRateLabels[userSettings.spkRateIndex]); break;
 #ifdef ENABLE_WIFI
-                case 4: M5Cardputer.Display.printf("Wi-Fi Power: %s", userSettings.wifiEnabled ? "ON" : "OFF"); break;
-                case 5: M5Cardputer.Display.printf("Wi-Fi Mode: %s", userSettings.isAPMode ? "AP (Host)" : "STA (Client)"); break;
+                case IDX_WIFI_POWER: M5Cardputer.Display.printf("Wi-Fi: %s", userSettings.wifiEnabled ? "ON" : "OFF"); break;
+                case IDX_WIFI_MODE: M5Cardputer.Display.printf("Wi-Fi Mode: %s", userSettings.isAPMode ? "AP" : "STA"); break;
+                case IDX_WIFI_SETUP: M5Cardputer.Display.print("> Setup Wi-Fi"); break;
+                case IDX_WIFI_AP: M5Cardputer.Display.print("> Setup AP"); break;
 #endif
-                case WIFI_SETTINGS_OFFSET + 0: M5Cardputer.Display.printf("Power Saver: %s", powerModeLabels[userSettings.powerSaverMode]); break;
-                case WIFI_SETTINGS_OFFSET + 1: M5Cardputer.Display.printf("Theme: %s", themeLabels[userSettings.themeIndex]); break;
-                case WIFI_SETTINGS_OFFSET + 2: M5Cardputer.Display.printf("Visualizer: %s", visModeLabels[userSettings.visMode]); break;
-#ifdef ENABLE_WIFI
-                case WIFI_SETTINGS_OFFSET + 3: M5Cardputer.Display.print("> Setup Wi-Fi Network"); break;
-                case WIFI_SETTINGS_OFFSET + 4: M5Cardputer.Display.print("> Setup AP (Host)"); break;
-#endif
-                case ACTION_SETTINGS_OFFSET + 0: M5Cardputer.Display.print("[ RESCAN LIBRARY ]"); break;
-                case ACTION_SETTINGS_OFFSET + 1: M5Cardputer.Display.print("[ EXPORT CONFIG TO SD ]"); break;
-                case ACTION_SETTINGS_OFFSET + 2: M5Cardputer.Display.print("[ IMPORT FROM SD ]"); break;
-                case ACTION_SETTINGS_OFFSET + 3: M5Cardputer.Display.printf("Splash Screen: %s", userSettings.showSplash ? "ON" : "OFF"); break;
+                case IDX_UPDATE_LIB: M5Cardputer.Display.print("[ Update Library ]"); break;
             }
         }
     }
@@ -3291,7 +3242,7 @@ public:
             delay(50);
         }
         
-        M5Cardputer.Display.setBrightness(userSettings.brightness);
+        M5Cardputer.Display.setBrightness(brightnessValues[userSettings.brightnessIndex]);
     }
 };
 
@@ -3334,7 +3285,7 @@ void setup() {
 #ifdef ENABLE_WIFI
     WebServerManager::setup();
 #endif
-    M5Cardputer.Display.setBrightness(userSettings.brightness);
+    M5Cardputer.Display.setBrightness(brightnessValues[userSettings.brightnessIndex]);
 
     // Show splash screen animation
     if (userSettings.showSplash) SplashScreen::show();
@@ -3386,7 +3337,7 @@ void loop() {
         static unsigned long lastProg = 0; if (millis() - lastProg > 1000) { UIManager::drawProgressBar(); lastProg = millis(); }
     }
 
-    if (userSettings.timeoutIndex > 0 && !isScreenOff) {
+    if (!isScreenOff) {
         if (millis() - lastInputTime > timeoutValues[userSettings.timeoutIndex]) { M5Cardputer.Display.setBrightness(0); M5Cardputer.Display.sleep(); isScreenOff = true; }
     }
 
@@ -3400,7 +3351,7 @@ void loop() {
 
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
         if (isScreenOff) {
-            M5Cardputer.Display.wakeup(); M5Cardputer.Display.setBrightness(userSettings.brightness); isScreenOff = false; lastInputTime = millis();
+            M5Cardputer.Display.wakeup(); M5Cardputer.Display.setBrightness(brightnessValues[userSettings.brightnessIndex]); isScreenOff = false; lastInputTime = millis();
             if (currentState == UI_ALBUM_SONGS) UIManager::drawAlbumSongs();
             else if (currentState == UI_SETTINGS) UIManager::drawSettings();
             else if (currentState == UI_HELP) UIManager::drawHelp();
@@ -3531,45 +3482,34 @@ void loop() {
                 else if (M5Cardputer.Keyboard.isKeyPressed('/') || M5Cardputer.Keyboard.isKeyPressed(',')) {
                     bool right = M5Cardputer.Keyboard.isKeyPressed('/');
                     switch (UIManager::settingsCursor) {
-                        case 0: userSettings.brightness = constrain(userSettings.brightness + (right?25:-25), 5, 255); M5Cardputer.Display.setBrightness(userSettings.brightness); break;
-                        case 1: userSettings.timeoutIndex = (userSettings.timeoutIndex + (right?1:-1) + 5) % 5; break;
-                        case 2: userSettings.spkRateIndex = (userSettings.spkRateIndex + (right?1:-1) + 5) % 5;
+                        case 0: userSettings.brightnessIndex = (userSettings.brightnessIndex + (right?1:-1) + 5) % 5; M5Cardputer.Display.setBrightness(brightnessValues[userSettings.brightnessIndex]); break;
+                        case 1: userSettings.timeoutIndex = (userSettings.timeoutIndex + (right?1:-1) + 6) % 6; break;
+                        case 2: userSettings.powerSaverMode = (userSettings.powerSaverMode + (right?1:-1) + 3) % 3; applyCpuFrequency(); break;
+                        case 3: userSettings.themeIndex = (userSettings.themeIndex + (right?1:-1) + NUM_THEMES) % NUM_THEMES; applyTheme(userSettings.themeIndex); UIManager::drawBaseUI(); break;
+                        case 4: userSettings.showSplash = !userSettings.showSplash; break;
+                        case 5: userSettings.seek = constrain(userSettings.seek + (right?5:-5), 5, 60); break;
+                        case 6: userSettings.spkRateIndex = (userSettings.spkRateIndex + (right?1:-1) + 5) % 5;
                                 { auto c = M5Cardputer.Speaker.config(); c.sample_rate = sampleRateValues[userSettings.spkRateIndex]; M5Cardputer.Speaker.config(c); } break;
-                        case 3: userSettings.seek = constrain(userSettings.seek + (right?5:-5), 5, 60); break;
 #ifdef ENABLE_WIFI
-                        case 4: userSettings.wifiEnabled = !userSettings.wifiEnabled; break;
-                        case 5: userSettings.isAPMode = !userSettings.isAPMode; break;
+                        case IDX_WIFI_POWER: userSettings.wifiEnabled = !userSettings.wifiEnabled; break;
+                        case IDX_WIFI_MODE: userSettings.isAPMode = !userSettings.isAPMode; break;
 #endif
                     }
-                    // Handle offset-based settings
-                    int offIdx = UIManager::settingsCursor;
-                    if (offIdx == WIFI_SETTINGS_OFFSET + 0) { userSettings.powerSaverMode = (userSettings.powerSaverMode + (right?1:-1) + 3) % 3; applyCpuFrequency(); }
-                    else if (offIdx == WIFI_SETTINGS_OFFSET + 1) {
-                        userSettings.themeIndex = (userSettings.themeIndex + (right?1:-1) + NUM_THEMES) % NUM_THEMES;
-                        applyTheme(userSettings.themeIndex); UIManager::drawBaseUI();
-                    }
-                    else if (offIdx == WIFI_SETTINGS_OFFSET + 2) {
-                        userSettings.visMode = (userSettings.visMode + (right?1:-1) + NUM_VIS_MODES) % NUM_VIS_MODES;
-                        UIManager::drawBaseUI();
-                    }
-                    else if (offIdx == ACTION_SETTINGS_OFFSET + 3) { userSettings.showSplash = !userSettings.showSplash; }
                     UIManager::drawSettings();
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
                     int enterIdx = UIManager::settingsCursor;
 #ifdef ENABLE_WIFI
-                    if (enterIdx == WIFI_SETTINGS_OFFSET + 3) { // Wi-Fi Setup
+                    if (enterIdx == IDX_WIFI_SETUP) {
                         currentState = UI_WIFI_SCAN; WiFi.mode(WIFI_STA); WiFi.disconnect(); delay(100);
                         UIManager::wifiNetworkCount = WiFi.scanNetworks(); UIManager::wifiCursor = 0; UIManager::wifiScrollOffset = 0;
                         UIManager::drawWifiScanner();
-                    } else if (enterIdx == WIFI_SETTINGS_OFFSET + 4) { // AP Setup
+                    } else if (enterIdx == IDX_WIFI_AP) {
                         currentState = UI_TEXT_INPUT; textInputTarget = 1; enteredText = userSettings.apSSID;
                         UIManager::drawTextInput();
                     } else
 #endif
-                    if (enterIdx == ACTION_SETTINGS_OFFSET + 0) { audioApp.performFullScan(); loadAlbumIndex(); currentState = UI_PLAYER; UIManager::drawBaseUI(); }
-                    else if (enterIdx == ACTION_SETTINGS_OFFSET + 1) { ConfigManager::exportToSD(); currentState = UI_PLAYER; UIManager::drawBaseUI(); }
-                    else if (enterIdx == ACTION_SETTINGS_OFFSET + 2) { ConfigManager::importFromSD(); currentState = UI_PLAYER; UIManager::drawBaseUI(); }
+                    if (enterIdx == IDX_UPDATE_LIB) { audioApp.performFullScan(); loadAlbumIndex(); currentState = UI_PLAYER; UIManager::drawBaseUI(); }
                 }
                 break;
 
