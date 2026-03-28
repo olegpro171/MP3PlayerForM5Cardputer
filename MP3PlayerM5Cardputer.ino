@@ -623,6 +623,7 @@ public:
     bool isShuffle = false;
     LoopState loopMode = NO_LOOP;
     uint32_t paused_at = 0;
+    uint32_t pausedSize = 0;
     String currentTitle = "";
     String currentArtist = "";
     String currentAlbum = "";
@@ -813,8 +814,12 @@ public:
 
     void togglePause() {
         if (!decoder) return;
-        if (decoder->isRunning()) { paused_at = id3->getPos(); decoder->stop(); isPaused = true; } 
-        else if (isPaused) { play(currentIndex, paused_at); }
+        if (decoder->isRunning()) { paused_at = id3->getPos(); pausedSize = id3->getSize(); decoder->stop(); isPaused = true; }
+        else if (isPaused) {
+            String savedTitle = currentTitle, savedArtist = currentArtist, savedAlbum = currentAlbum;
+            play(currentIndex, paused_at);
+            currentTitle = savedTitle; currentArtist = savedArtist; currentAlbum = savedAlbum;
+        }
     }
 
     void seek(int seconds) {
@@ -1288,9 +1293,15 @@ public:
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(xStart + 5, yStart + 16);
         if (audioApp.currentTitle.length() > 0) M5Cardputer.Display.print(audioApp.currentTitle.substring(0, 15));
         
-        if (audioApp.id3 && audioApp.file) {
+        {
             int maxW = M5Cardputer.Display.width() - xStart - 10;
-            int curW = (int)((float)audioApp.id3->getPos() / (float)audioApp.id3->getSize() * maxW);
+            float pos = 0, size = 1;
+            if (audioApp.isPaused && audioApp.pausedSize > 0) {
+                pos = audioApp.paused_at; size = audioApp.pausedSize;
+            } else if (audioApp.id3 && audioApp.file) {
+                pos = audioApp.id3->getPos(); size = audioApp.id3->getSize();
+            }
+            int curW = (size > 0) ? (int)(pos / size * maxW) : 0;
             M5Cardputer.Display.fillRect(xStart-3, yStart+30-3, maxW+6, 9, C_BG_DARK); M5Cardputer.Display.fillRect(xStart, yStart+30, maxW, 3, C_BG_LIGHT);
             M5Cardputer.Display.fillRect(xStart, yStart+30, min(curW, maxW), 3, C_HIGHLIGHT); M5Cardputer.Display.fillCircle(xStart + min(curW, maxW), yStart+30+1, 3, C_TEXT_MAIN);
         }
