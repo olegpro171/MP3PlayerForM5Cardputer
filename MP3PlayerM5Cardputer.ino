@@ -40,6 +40,7 @@ struct TagInfo {
     String artist;
     String title;
     uint8_t trackNo;
+    uint16_t duration;   // seconds (0 = unknown)
 };
 
 #define PLAYLIST_WIDTH 120
@@ -453,7 +454,7 @@ String getAlbumSongTrackStr(int songIdx) {
 
 bool readTagInfo(const char* filepath, TagInfo& out) {
     out.album = ""; out.artist = ""; out.title = "";
-    out.trackNo = 0;
+    out.trackNo = 0; out.duration = 0;
     File f = SD.open(filepath);
     if (!f) return false;
     size_t fsize = f.size();
@@ -521,6 +522,60 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
                     out.trackNo = tag[126];
             }
         }
+        // Extract duration from first MP3 frame (Xing/Info header for VBR, or CBR calculation)
+        if (out.duration == 0) {
+            // Find first sync word after ID3v2 tag
+            uint32_t audioStart = 0;
+            f.seek(0); uint8_t id3h[10]; f.read(id3h, 10);
+            if (id3h[0] == 'I' && id3h[1] == 'D' && id3h[2] == '3')
+                audioStart = 10 + (((uint32_t)(id3h[6] & 0x7F) << 21) | ((uint32_t)(id3h[7] & 0x7F) << 14) | ((uint32_t)(id3h[8] & 0x7F) << 7) | (id3h[9] & 0x7F));
+            f.seek(audioStart);
+            // Scan for sync word (max 4KB search)
+            uint32_t scanLimit = min(audioStart + 4096, (uint32_t)fsize);
+            uint8_t sb[2]; bool foundSync = false;
+            while (f.position() < scanLimit - 1) {
+                f.read(sb, 1);
+                if (sb[0] == 0xFF) { f.read(sb + 1, 1); if ((sb[1] & 0xE0) == 0xE0) { foundSync = true; break; } }
+            }
+            if (foundSync) {
+                uint32_t frameStart = f.position() - 2;
+                f.seek(frameStart); uint8_t fh[4]; f.read(fh, 4);
+                int version = (fh[1] >> 3) & 3;   // 3=MPEG1, 2=MPEG2, 0=MPEG2.5
+                int brIdx = (fh[2] >> 4) & 0xF;
+                int srIdx = (fh[2] >> 2) & 3;
+                static const int brTable[] = {0,32,40,48,56,64,80,96,112,128,160,192,224,256,320,0};
+                static const int srTable[] = {44100, 48000, 32000};
+                if (brIdx > 0 && brIdx < 15 && srIdx < 3) {
+                    int bitrate = brTable[brIdx];
+                    int sampleRate = srTable[srIdx];
+                    int samplesPerFrame = (version == 3) ? 1152 : 576;
+                    int frameSize = samplesPerFrame * bitrate * 1000 / 8 / sampleRate;
+                    // Read frame and look for Xing/Info header
+                    f.seek(frameStart);
+                    uint8_t frameBuf[512]; int toRead = min(frameSize + 4, 512);
+                    f.read(frameBuf, toRead);
+                    int xingOff = -1;
+                    for (int i = 4; i < toRead - 8; i++) {
+                        if ((frameBuf[i] == 'X' && frameBuf[i+1] == 'i' && frameBuf[i+2] == 'n' && frameBuf[i+3] == 'g') ||
+                            (frameBuf[i] == 'I' && frameBuf[i+1] == 'n' && frameBuf[i+2] == 'f' && frameBuf[i+3] == 'o')) {
+                            xingOff = i; break;
+                        }
+                    }
+                    if (xingOff >= 0 && xingOff + 8 < toRead) {
+                        uint32_t flags = ((uint32_t)frameBuf[xingOff+4]<<24) | ((uint32_t)frameBuf[xingOff+5]<<16) | ((uint32_t)frameBuf[xingOff+6]<<8) | frameBuf[xingOff+7];
+                        if (flags & 1) { // frames field present
+                            uint32_t frames = ((uint32_t)frameBuf[xingOff+8]<<24) | ((uint32_t)frameBuf[xingOff+9]<<16) | ((uint32_t)frameBuf[xingOff+10]<<8) | frameBuf[xingOff+11];
+                            out.duration = (uint16_t)((uint32_t)frames * samplesPerFrame / sampleRate);
+                        }
+                    }
+                    if (out.duration == 0) {
+                        // CBR fallback: (fileSize - audioStart) / (bitrate * 1000 / 8)
+                        uint32_t audioBytes = fsize - audioStart;
+                        out.duration = (uint16_t)(audioBytes / (bitrate * 1000 / 8));
+                    }
+                }
+            }
+        }
         f.close(); return true;
     }
 
@@ -534,7 +589,15 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
             lastBlock = (bhdr[0] & 0x80) != 0;
             uint8_t blockType = bhdr[0] & 0x7F;
             uint32_t blockLen = ((uint32_t)bhdr[1] << 16) | ((uint32_t)bhdr[2] << 8) | bhdr[3];
-            if (blockType == 4) { // VORBIS_COMMENT
+            if (blockType == 0 && blockLen >= 34) { // STREAMINFO
+                // Bytes 10-17: sample rate (20 bits), channels, bps, total samples (36 bits)
+                uint8_t si[18]; f.read(si, 18);
+                uint32_t sr = ((uint32_t)si[10] << 12) | ((uint32_t)si[11] << 4) | (si[12] >> 4);
+                uint32_t totalSamples = ((uint32_t)(si[13] & 0x0F) << 32) | ((uint32_t)si[14] << 24) | ((uint32_t)si[15] << 16) | ((uint32_t)si[16] << 8) | si[17];
+                if (sr > 0 && totalSamples > 0) out.duration = (uint16_t)(totalSamples / sr);
+                f.seek(f.position() + blockLen - 18);
+            }
+            else if (blockType == 4) { // VORBIS_COMMENT
                 uint32_t blockStart = f.position();
                 uint32_t blockEnd = blockStart + blockLen;
                 // Skip vendor string
@@ -585,6 +648,17 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
                 pos += skip;
                 continue;
             }
+            // mvhd atom: contains timescale and duration
+            if (strcmp(atomType, "mvhd") == 0 && atomSize >= 28) {
+                f.seek(pos + 8); uint8_t ver; f.read(&ver, 1);
+                if (ver == 0) { // version 0: 4-byte fields
+                    f.seek(pos + 20); uint8_t td[8]; f.read(td, 8);
+                    uint32_t timescale = ((uint32_t)td[0]<<24)|((uint32_t)td[1]<<16)|((uint32_t)td[2]<<8)|td[3];
+                    uint32_t dur = ((uint32_t)td[4]<<24)|((uint32_t)td[5]<<16)|((uint32_t)td[6]<<8)|td[7];
+                    if (timescale > 0) out.duration = (uint16_t)(dur / timescale);
+                }
+                pos += atomSize; continue;
+            }
             // Check for text atoms: \xA9alb (album), \xA9ART (artist), \xA9nam (title)
             if (buf[4] == 0xA9 && pos + atomSize <= searchLimit && atomSize > 24) {
                 bool isAlbum = (buf[5] == 'a' && buf[6] == 'l' && buf[7] == 'b');
@@ -615,7 +689,24 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
         f.close(); return true;
     }
 
-    // WAV: no standard album tag, skip
+    // WAV: read duration from fmt chunk
+    if (path.endsWith(".wav") && fsize > 44) {
+        f.seek(0); uint8_t riff[12]; f.read(riff, 12);
+        if (riff[0]=='R' && riff[1]=='I' && riff[2]=='F' && riff[3]=='F') {
+            // Find fmt chunk
+            while (f.position() < fsize - 8) {
+                uint8_t ch[8]; f.read(ch, 8);
+                uint32_t ckSize = ch[4] | (ch[5]<<8) | (ch[6]<<16) | (ch[7]<<24);
+                if (ch[0]=='f' && ch[1]=='m' && ch[2]=='t' && ch[3]==' ' && ckSize >= 16) {
+                    uint8_t fmt[16]; f.read(fmt, 16);
+                    uint32_t byteRate = fmt[8] | (fmt[9]<<8) | (fmt[10]<<16) | (fmt[11]<<24);
+                    if (byteRate > 0) out.duration = (uint16_t)((fsize - 44) / byteRate);
+                    break;
+                }
+                f.seek(f.position() + ckSize);
+            }
+        }
+    }
     f.close();
     return true;
 }
@@ -623,6 +714,7 @@ bool readTagInfo(const char* filepath, TagInfo& out) {
 // Forward declarations for album helpers used in AudioEngine
 String getAlbumSongPath(int songIdx);
 int findSongInPlaylist(const String& targetPath);
+uint16_t lookupDuration(int songIndex);
 
 // ==========================================
 // AUDIO ENGINE
@@ -642,10 +734,7 @@ public:
     LoopState loopMode = NO_LOOP;
     uint32_t paused_at = 0;
     uint32_t pausedSize = 0;
-    unsigned long playStartMillis = 0;   // millis() when playback started
-    unsigned long pausedElapsed = 0;     // elapsed ms accumulated before pause
-    uint32_t playStartBytes = 0;        // byte position when playback started
-    float bytesPerSec = 0;              // computed from actual playback rate
+    uint16_t currentDuration = 0;       // pre-calculated duration in seconds (from scan index)
     String currentTitle = "";
     String currentArtist = "";
     String currentAlbum = "";
@@ -676,11 +765,12 @@ public:
                             rawAlbumFile->println(filepath);
                         }
                         if (searchIdxFile) {
-                            // Format: filepath\tartist\ttitle\talbum (one line per song)
+                            // Format: filepath\tartist\ttitle\talbum\tduration
                             searchIdxFile->print(filepath); searchIdxFile->print("\t");
                             searchIdxFile->print(tag.artist); searchIdxFile->print("\t");
                             searchIdxFile->print(tag.title); searchIdxFile->print("\t");
-                            searchIdxFile->println(tag.album);
+                            searchIdxFile->print(tag.album); searchIdxFile->print("\t");
+                            searchIdxFile->println(tag.duration);
                         }
                     }
                     M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
@@ -843,10 +933,7 @@ public:
         else decoder = new AudioGeneratorMP3();
         
         isPaused = false;
-        playStartMillis = millis();
-        playStartBytes = startPos;
-        pausedElapsed = 0;
-        if (startPos == 0) bytesPerSec = 0; // reset for new song, keep for seek
+        if (startPos == 0) currentDuration = lookupDuration(currentIndex);
         bool ok = decoder->begin(id3, out);
         if (ok) ConfigManager::save(startPos, currentIndex);
         return ok;
@@ -856,32 +943,27 @@ public:
         if (!decoder) return;
         if (decoder->isRunning()) {
             paused_at = id3->getPos(); pausedSize = id3->getSize();
-            pausedElapsed += millis() - playStartMillis;
             decoder->stop(); isPaused = true;
         } else if (isPaused) {
             String savedTitle = currentTitle, savedArtist = currentArtist, savedAlbum = currentAlbum;
-            float savedBps = bytesPerSec;
-            unsigned long savedElapsed = pausedElapsed;
+            uint16_t savedDur = currentDuration;
             play(currentIndex, paused_at);
             currentTitle = savedTitle; currentArtist = savedArtist; currentAlbum = savedAlbum;
-            bytesPerSec = savedBps;
-            pausedElapsed = savedElapsed;
+            currentDuration = savedDur;
         }
     }
 
     void seek(int seconds) {
         if (!decoder || !decoder->isRunning() || !id3) return;
-        float bps = bytesPerSec > 0 ? bytesPerSec : 32000;
+        // Convert seconds to bytes using pre-calculated duration
+        float bps = (currentDuration > 0) ? (float)id3->getSize() / currentDuration : 32000;
         int32_t newPos = id3->getPos() + (int32_t)(seconds * bps);
         if (newPos < 0) newPos = 0; if (newPos > id3->getSize()) newPos = id3->getSize() - 1000;
-        // Preserve metadata and timing across seek
         String savedTitle = currentTitle, savedArtist = currentArtist, savedAlbum = currentAlbum;
-        float savedBps = bytesPerSec;
-        unsigned long elapsed = pausedElapsed + (millis() - playStartMillis);
+        uint16_t savedDur = currentDuration;
         play(currentIndex, newPos);
         currentTitle = savedTitle; currentArtist = savedArtist; currentAlbum = savedAlbum;
-        bytesPerSec = savedBps;
-        pausedElapsed = elapsed;
+        currentDuration = savedDur;
     }
 
     void next(bool autoPlay = false) {
@@ -935,30 +1017,19 @@ public:
         play(currentIndex);
     }
 
-    // Get elapsed playback seconds (accounts for pauses and seeks)
+    // Elapsed seconds: duration * (currentPos / totalSize)
     int getElapsedSec() {
-        if (isPaused) return (bytesPerSec > 0 && id3) ? (int)(paused_at / bytesPerSec) : (int)(pausedElapsed / 1000);
-        unsigned long totalMs = pausedElapsed + (millis() - playStartMillis);
-        if (bytesPerSec > 0 && id3) return (int)(id3->getPos() / bytesPerSec);
-        return (int)(totalMs / 1000);
+        if (currentDuration == 0) return 0;
+        uint32_t pos = isPaused ? paused_at : (id3 ? id3->getPos() : 0);
+        uint32_t size = isPaused ? pausedSize : (id3 ? id3->getSize() : 0);
+        if (size == 0) return 0;
+        return (int)((uint64_t)currentDuration * pos / size);
     }
 
-    // Get total duration in seconds
-    int getTotalSec() {
-        if (bytesPerSec > 0 && id3 && id3->getSize() > 0) return (int)(id3->getSize() / bytesPerSec);
-        return 0;
-    }
+    int getTotalSec() { return currentDuration; }
 
     void loopTasks() {
         if (decoder && decoder->isRunning()) {
-            // Continuously refine bytes-per-second from actual playback rate
-            if (id3 && playStartMillis > 0) {
-                unsigned long elapsedMs = pausedElapsed + (millis() - playStartMillis);
-                if (elapsedMs > 2000) { // wait 2 sec for stable estimate
-                    uint32_t bytesPlayed = id3->getPos() - playStartBytes;
-                    if (bytesPlayed > 0) bytesPerSec = (float)bytesPlayed / ((float)elapsedMs / 1000.0f);
-                }
-            }
             if (!decoder->loop()) { decoder->stop(); next(true); if(userSettings.resumePlay) ConfigManager::save(id3 ? id3->getPos() : 0, currentIndex); }
         }
     }
@@ -979,6 +1050,28 @@ int findSongInPlaylist(const String& targetPath) {
     }
     f.close();
     return -1;
+}
+
+// Look up pre-calculated duration (seconds) from search index for a given song index.
+// Search index lines: filepath\tartist\ttitle\talbum\tduration
+uint16_t lookupDuration(int songIndex) {
+    if (!SD.exists(SEARCH_INDEX_FILE)) return 0;
+    File f = SD.open(SEARCH_INDEX_FILE);
+    if (!f) return 0;
+    int idx = 0;
+    while (f.available()) {
+        String line = f.readStringUntil('\n');
+        if (idx == songIndex) {
+            f.close();
+            // Find last tab — duration is the last field
+            int lastTab = line.lastIndexOf('\t');
+            if (lastTab >= 0) return (uint16_t)line.substring(lastTab + 1).toInt();
+            return 0;
+        }
+        idx++;
+    }
+    f.close();
+    return 0;
 }
 
 // ==========================================
