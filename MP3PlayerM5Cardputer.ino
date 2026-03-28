@@ -1162,6 +1162,7 @@ int findSongInPlaylist(const String& targetPath) {
 
 // Look up pre-calculated duration and audio offset from search index.
 // Search index lines: filepath\tartist\ttitle\talbum\tduration\taudioOffset
+// Search index format: filepath\tartist\ttitle\talbum\tduration\taudioOffset
 void lookupSongMeta(int songIndex) {
     audioApp.currentDuration = 0;
     audioApp.currentAudioOffset = 0;
@@ -1174,13 +1175,30 @@ void lookupSongMeta(int songIndex) {
         if (idx == songIndex) {
             f.close();
             line.trim();
-            // Parse last two tab-separated fields: duration and audioOffset
-            int lastTab = line.lastIndexOf('\t');
-            if (lastTab < 0) return;
-            audioApp.currentAudioOffset = (uint32_t)line.substring(lastTab + 1).toInt();
-            String rest = line.substring(0, lastTab);
-            int prevTab = rest.lastIndexOf('\t');
-            if (prevTab >= 0) audioApp.currentDuration = (uint16_t)rest.substring(prevTab + 1).toInt();
+            // Parse 6 tab-separated fields
+            int t1 = line.indexOf('\t');                          // after filepath
+            int t2 = (t1 >= 0) ? line.indexOf('\t', t1+1) : -1; // after artist
+            int t3 = (t2 >= 0) ? line.indexOf('\t', t2+1) : -1; // after title
+            int t4 = (t3 >= 0) ? line.indexOf('\t', t3+1) : -1; // after album
+            int t5 = (t4 >= 0) ? line.indexOf('\t', t4+1) : -1; // after duration
+            if (t1 >= 0 && t2 >= 0) {
+                String artist = line.substring(t1+1, t2); artist.trim();
+                if (artist.length() > 0 && audioApp.currentArtist.length() == 0) audioApp.currentArtist = artist;
+            }
+            if (t2 >= 0 && t3 >= 0) {
+                String title = line.substring(t2+1, t3); title.trim();
+                if (title.length() > 0 && audioApp.currentTitle.length() == 0) audioApp.currentTitle = title;
+            }
+            if (t3 >= 0 && t4 >= 0) {
+                String album = line.substring(t3+1, t4); album.trim();
+                if (album.length() > 0 && audioApp.currentAlbum.length() == 0) audioApp.currentAlbum = album;
+            }
+            if (t4 >= 0 && t5 >= 0) {
+                audioApp.currentDuration = (uint16_t)line.substring(t4+1, t5).toInt();
+            }
+            if (t5 >= 0) {
+                audioApp.currentAudioOffset = (uint32_t)line.substring(t5+1).toInt();
+            }
             return;
         }
         idx++;
@@ -2875,20 +2893,37 @@ void loop() {
                         } else {
                             // Open album
                             loadAlbumSongs(row.dataIdx);
+                            // Position cursor on currently playing song if in this album
+                            String currentPath = audioApp.getSongPath(audioApp.currentIndex);
+                            for (int si = 0; si < (int)g_albumSongOffsets.size(); si++) {
+                                if (getAlbumSongPath(si) == currentPath) {
+                                    g_albumSongCursor = si;
+                                    if (g_albumSongCursor >= MAX_VISIBLE_ROWS)
+                                        g_albumSongScrollOffset = g_albumSongCursor - MAX_VISIBLE_ROWS / 2;
+                                    break;
+                                }
+                            }
                             currentState = UI_ALBUM_SONGS;
                             UIManager::drawAlbumSongs();
                         }
                     }
                 }
-                else if (M5Cardputer.Keyboard.isKeyPressed('e')) {
-                    for (size_t i = 0; i < g_artistExpanded.size(); i++) g_artistExpanded[i] = true;
-                    rebuildSidebarRows(); UIManager::drawPlaylist();
-                }
-                else if (M5Cardputer.Keyboard.isKeyPressed('q')) {
-                    for (size_t i = 0; i < g_artistExpanded.size(); i++) g_artistExpanded[i] = false;
+                else if (M5Cardputer.Keyboard.isKeyPressed('e') || M5Cardputer.Keyboard.isKeyPressed('q')) {
+                    bool expand = M5Cardputer.Keyboard.isKeyPressed('e');
+                    // Save which artist the cursor is on
+                    int savedArtistIdx = -1;
+                    if (g_sidebarCursor >= 0 && g_sidebarCursor < (int)g_sidebarRows.size()) {
+                        SidebarRow& r = g_sidebarRows[g_sidebarCursor];
+                        savedArtistIdx = r.isArtist ? r.dataIdx : ((r.dataIdx >= 0 && r.dataIdx < (int)g_albumArtistMap.size()) ? g_albumArtistMap[r.dataIdx] : -1);
+                    }
+                    for (size_t i = 0; i < g_artistExpanded.size(); i++) g_artistExpanded[i] = expand;
                     rebuildSidebarRows();
-                    // Move cursor to nearest artist row
+                    // Reposition cursor on the same artist
+                    for (int i = 0; i < (int)g_sidebarRows.size(); i++) {
+                        if (g_sidebarRows[i].isArtist && g_sidebarRows[i].dataIdx == savedArtistIdx) { g_sidebarCursor = i; break; }
+                    }
                     if (g_sidebarCursor >= (int)g_sidebarRows.size()) g_sidebarCursor = max(0, (int)g_sidebarRows.size() - 1);
+                    g_sidebarScrollOffset = max(0, min(g_sidebarCursor - MAX_VISIBLE_ROWS / 2, (int)g_sidebarRows.size() - MAX_VISIBLE_ROWS));
                     UIManager::drawPlaylist();
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed('p')) { audioApp.togglePause(); UIManager::drawNowPlaying(); }
