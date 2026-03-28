@@ -642,6 +642,10 @@ public:
     LoopState loopMode = NO_LOOP;
     uint32_t paused_at = 0;
     uint32_t pausedSize = 0;
+    unsigned long playStartMillis = 0;   // millis() when playback started
+    unsigned long pausedElapsed = 0;     // elapsed ms accumulated before pause
+    uint32_t playStartBytes = 0;        // byte position when playback started
+    float bytesPerSec = 0;              // computed from actual playback rate
     String currentTitle = "";
     String currentArtist = "";
     String currentAlbum = "";
@@ -839,6 +843,10 @@ public:
         else decoder = new AudioGeneratorMP3();
         
         isPaused = false;
+        playStartMillis = millis();
+        playStartBytes = startPos;
+        pausedElapsed = 0;
+        if (startPos == 0) bytesPerSec = 0; // reset for new song, keep for seek
         bool ok = decoder->begin(id3, out);
         if (ok) ConfigManager::save(startPos, currentIndex);
         return ok;
@@ -846,23 +854,34 @@ public:
 
     void togglePause() {
         if (!decoder) return;
-        if (decoder->isRunning()) { paused_at = id3->getPos(); pausedSize = id3->getSize(); decoder->stop(); isPaused = true; }
-        else if (isPaused) {
+        if (decoder->isRunning()) {
+            paused_at = id3->getPos(); pausedSize = id3->getSize();
+            pausedElapsed += millis() - playStartMillis;
+            decoder->stop(); isPaused = true;
+        } else if (isPaused) {
             String savedTitle = currentTitle, savedArtist = currentArtist, savedAlbum = currentAlbum;
+            float savedBps = bytesPerSec;
+            unsigned long savedElapsed = pausedElapsed;
             play(currentIndex, paused_at);
             currentTitle = savedTitle; currentArtist = savedArtist; currentAlbum = savedAlbum;
+            bytesPerSec = savedBps;
+            pausedElapsed = savedElapsed;
         }
     }
 
     void seek(int seconds) {
         if (!decoder || !decoder->isRunning() || !id3) return;
-        int32_t newPos = id3->getPos() + (seconds * 16000);
+        float bps = bytesPerSec > 0 ? bytesPerSec : 32000;
+        int32_t newPos = id3->getPos() + (int32_t)(seconds * bps);
         if (newPos < 0) newPos = 0; if (newPos > id3->getSize()) newPos = id3->getSize() - 1000;
-        // Preserve metadata across seek — play() clears it, and seeking
-        // past the ID3 header means the callback won't repopulate it.
+        // Preserve metadata and timing across seek
         String savedTitle = currentTitle, savedArtist = currentArtist, savedAlbum = currentAlbum;
+        float savedBps = bytesPerSec;
+        unsigned long elapsed = pausedElapsed + (millis() - playStartMillis);
         play(currentIndex, newPos);
         currentTitle = savedTitle; currentArtist = savedArtist; currentAlbum = savedAlbum;
+        bytesPerSec = savedBps;
+        pausedElapsed = elapsed;
     }
 
     void next(bool autoPlay = false) {
@@ -916,8 +935,30 @@ public:
         play(currentIndex);
     }
 
+    // Get elapsed playback seconds (accounts for pauses and seeks)
+    int getElapsedSec() {
+        if (isPaused) return (bytesPerSec > 0 && id3) ? (int)(paused_at / bytesPerSec) : (int)(pausedElapsed / 1000);
+        unsigned long totalMs = pausedElapsed + (millis() - playStartMillis);
+        if (bytesPerSec > 0 && id3) return (int)(id3->getPos() / bytesPerSec);
+        return (int)(totalMs / 1000);
+    }
+
+    // Get total duration in seconds
+    int getTotalSec() {
+        if (bytesPerSec > 0 && id3 && id3->getSize() > 0) return (int)(id3->getSize() / bytesPerSec);
+        return 0;
+    }
+
     void loopTasks() {
         if (decoder && decoder->isRunning()) {
+            // Continuously refine bytes-per-second from actual playback rate
+            if (id3 && playStartMillis > 0) {
+                unsigned long elapsedMs = pausedElapsed + (millis() - playStartMillis);
+                if (elapsedMs > 2000) { // wait 2 sec for stable estimate
+                    uint32_t bytesPlayed = id3->getPos() - playStartBytes;
+                    if (bytesPlayed > 0) bytesPerSec = (float)bytesPlayed / ((float)elapsedMs / 1000.0f);
+                }
+            }
             if (!decoder->loop()) { decoder->stop(); next(true); if(userSettings.resumePlay) ConfigManager::save(id3 ? id3->getPos() : 0, currentIndex); }
         }
     }
@@ -1367,14 +1408,8 @@ public:
         visSprite.setFont(&fonts::Font0);
         visSprite.setTextColor(C_TEXT_MAIN); visSprite.setCursor(textX, 4); visSprite.print(artist.substring(0, maxChars));
         visSprite.setTextColor(C_TEXT_DIM); visSprite.setCursor(textX, 16); visSprite.print(album.substring(0, maxChars));
-        int elapsedSec = 0, totalSec = 0;
-        if (audioApp.isPaused && audioApp.pausedSize > 0) {
-            elapsedSec = audioApp.paused_at / 16000;
-            totalSec = audioApp.pausedSize / 16000;
-        } else if (audioApp.id3 && audioApp.id3->getSize() > 0) {
-            elapsedSec = audioApp.id3->getPos() / 16000;
-            totalSec = audioApp.id3->getSize() / 16000;
-        }
+        int elapsedSec = audioApp.getElapsedSec();
+        int totalSec = audioApp.getTotalSec();
         char timeStr[16];
         sprintf(timeStr, "%02d:%02d/%02d:%02d", elapsedSec / 60, elapsedSec % 60, totalSec / 60, totalSec % 60);
         visSprite.setTextColor(C_HIGHLIGHT); visSprite.setCursor(textX, 28); visSprite.print(timeStr);
