@@ -700,14 +700,34 @@ public:
 
 };
 
-void applyCpuFrequency() {
+// Get the target CPU frequency based on power mode setting
+int getTargetCpuMhz() {
     if (
 #ifdef ENABLE_WIFI
         userSettings.wifiEnabled ||
 #endif
-        userSettings.powerSaverMode == 0) setCpuFrequencyMhz(240); 
-    else if (userSettings.powerSaverMode == 1) setCpuFrequencyMhz(160); 
-    else setCpuFrequencyMhz(80); 
+        userSettings.powerSaverMode == 0) return 240;
+    else if (userSettings.powerSaverMode == 1) return 160;
+    else return 80;
+}
+
+void applyCpuFrequency() {
+    setCpuFrequencyMhz(getTargetCpuMhz());
+}
+
+// Drop CPU to minimum when idle (paused + screen off). Restore on activity.
+void applyCpuForState(bool isPlaying, bool screenOff) {
+    if (!isPlaying && screenOff) {
+        // Nothing happening — minimum power
+        setCpuFrequencyMhz(80);
+    } else if (!isPlaying) {
+        // Paused but screen on — need enough for UI, drop below normal
+        int target = getTargetCpuMhz();
+        setCpuFrequencyMhz(min(target, 160));
+    } else {
+        // Playing — full target speed for audio decoding
+        applyCpuFrequency();
+    }
 }
 
 // ==========================================
@@ -1345,6 +1365,7 @@ public:
     static void MDCallback(void *cbData, const char *type, bool isUnicode, const char *string);
 
     bool play(int index, uint32_t startPos = 0) {
+        applyCpuFrequency(); // ensure full speed for decoding
         stop(); if (songOffsets.empty()) return false;
         currentIndex = index; browserIndex = index; currentTitle = ""; currentArtist = ""; currentAlbum = "";
         String fname = getSongPath(currentIndex);
@@ -1376,7 +1397,10 @@ public:
         if (decoder->isRunning()) {
             paused_at = id3->getPos(); pausedSize = id3->getSize();
             decoder->stop(); isPaused = true;
+            M5Cardputer.Speaker.stop(); // stop DMA to save power
+            applyCpuForState(false, isScreenOff);
         } else if (isPaused) {
+            applyCpuFrequency(); // restore CPU before decoding
             String savedTitle = currentTitle, savedArtist = currentArtist, savedAlbum = currentAlbum;
             uint16_t savedDur = currentDuration;
             uint32_t savedOffset = currentAudioOffset;
@@ -3338,7 +3362,10 @@ void loop() {
     }
 
     if (!isScreenOff) {
-        if (millis() - lastInputTime > timeoutValues[userSettings.timeoutIndex]) { M5Cardputer.Display.setBrightness(0); M5Cardputer.Display.sleep(); isScreenOff = true; }
+        if (millis() - lastInputTime > timeoutValues[userSettings.timeoutIndex]) {
+            M5Cardputer.Display.setBrightness(0); M5Cardputer.Display.sleep(); isScreenOff = true;
+            applyCpuForState(!audioApp.isPaused, true); // drop CPU when screen off
+        }
     }
 
     if(M5Cardputer.BtnA.wasDecideClickCount()){
@@ -3352,6 +3379,7 @@ void loop() {
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
         if (isScreenOff) {
             M5Cardputer.Display.wakeup(); M5Cardputer.Display.setBrightness(brightnessValues[userSettings.brightnessIndex]); isScreenOff = false; lastInputTime = millis();
+            applyCpuForState(!audioApp.isPaused, false); // restore CPU for UI rendering
             if (currentState == UI_ALBUM_SONGS) UIManager::drawAlbumSongs();
             else if (currentState == UI_SETTINGS) UIManager::drawSettings();
             else if (currentState == UI_HELP) UIManager::drawHelp();
