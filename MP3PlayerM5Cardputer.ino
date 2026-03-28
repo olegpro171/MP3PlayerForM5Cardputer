@@ -99,6 +99,7 @@ const char* helpLines[] = {
   "N / B : Next / Prev Song",
   "/ / , : Seek +Xs / -Xs",
   "S: Search  F: Shuffle",
+  "L: Loop (1x/LP/1T)",
   "E: Expand  Q: Collapse all",
   "Esc / ` : Settings",
   "V: Visualizer  T: Track Info",
@@ -123,7 +124,7 @@ const char* helpLines[] = {
   "GH: github.com/sanchitminda",
   "Share your suggestions!"
 };
-const int numHelpLines = 30;
+const int numHelpLines = 31;
 const int numSettings = 16;
 
 // ==========================================
@@ -1650,9 +1651,9 @@ public:
         if (audioApp.isShuffle) { M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("SHF "); } else { M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("___ "); }
 
         switch(audioApp.loopMode) {
-            case NO_LOOP: M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("1X"); break;
-            case LOOP_ALL: M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("ALL"); break;
-            case LOOP_ONE: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("ONE"); break;
+            case NO_LOOP: M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("1x"); break;
+            case LOOP_ALL: M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("LP"); break;
+            case LOOP_ONE: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("1T"); break;
         }
 
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(xStart + 5, yStart + 16);
