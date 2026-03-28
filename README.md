@@ -39,10 +39,26 @@ Elapsed time is computed as `duration * (bytesPlayed / totalAudioBytes)`, accoun
 
 Search now supports **multi-token matching against ID3 tags**. Typing "li fa" finds "Linkin Park - Faint" because "li" matches the artist and "fa" matches the title. The search index includes artist, title, album, and file path, so you can also search by folder name or any combination.
 
+### Multi-Scope Shuffle
+
+The original shuffle picked a random song each time, often repeating tracks back-to-back. This fork replaces it with a **no-repeat shuffle queue** — like shuffling a deck of cards. Every song plays once before reshuffling.
+
+Four shuffle modes, cycled with the **F** key:
+
+| Display | Mode | Scope |
+|---------|------|-------|
+| `___` | Off | Sequential within album |
+| `SA` | Shuffle Album | All tracks in current album |
+| `SR` | Shuffle Artist | All songs by the current artist, across all their albums |
+| `SG` | Shuffle Global | All songs in the entire library |
+
+Prev goes backward through the shuffled order. When the queue is exhausted, it reshuffles (if looping) or pauses.
+
 ### Better State Persistence
 
 - **Volume** is now saved and restored on boot (it wasn't before)
 - **Song position** is saved reliably on every song change, not just on pause
+- **Album context** is saved and restored on boot — next/prev continues within the same album after reboot instead of jumping to the global playlist
 - The original had a bug where the save guard `if(currentPos > 0)` silently skipped saving when a song started from position 0 (every normal play). Fixed.
 
 ### Additional Improvements
@@ -55,6 +71,7 @@ Search now supports **multi-token matching against ID3 tags**. Typing "li fa" fi
 - **Settings validation**: All settings are bounds-checked on load to prevent crashes from corrupted NVS values
 - **Now Playing visualizer**: New text-only visualizer mode showing artist, album, and time without the animated art, giving more space for text
 - **Visualizer renders when paused**: Info visualizer mode (Now Playing tags with no extra graphics), stays visible during pause instead of going blank
+- **No SD card prompt**: Friendly message instead of a black screen hang when SD card is missing, with retry on key press
 
 ### Removed
 
@@ -101,7 +118,7 @@ Search now supports **multi-token matching against ID3 tags**. Typing "li fa" fi
 | **/ / ,** | Seek forward / backward |
 | **[ / ]** | Volume down / up |
 | **S** | Search (multi-token, searches tags) |
-| **F** | Toggle shuffle |
+| **F** | Shuffle mode: off / SA (album) / SR (artist) / SG (global) |
 | **L** | Loop mode: 1x (once) / LP (loop) / 1T (one track) |
 | **V** | Cycle visualizer mode |
 | **T** | Track info popup (full title/artist/album) |
