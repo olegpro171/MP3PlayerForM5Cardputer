@@ -84,7 +84,7 @@ void applyTheme(int index) {
 }
 
 enum LoopState { NO_LOOP, LOOP_ALL, LOOP_ONE };
-enum UIState { UI_PLAYER, UI_SETTINGS, UI_HELP, UI_WIFI_SCAN, UI_TEXT_INPUT, UI_SEARCH, UI_ALBUM_SONGS };
+enum UIState { UI_PLAYER, UI_SETTINGS, UI_HELP, UI_WIFI_SCAN, UI_TEXT_INPUT, UI_SEARCH, UI_ALBUM_SONGS, UI_TRACK_INFO };
 
 const uint32_t sampleRateValues[] = { 44100, 48000, 88200, 96000, 128000 };
 const char* sampleRateLabels[] = { "44.1k", "48k", "88.2k", "96k", "128k" };
@@ -101,7 +101,7 @@ const char* helpLines[] = {
   "S: Search  F: Shuffle",
   "E: Expand  Q: Collapse all",
   "Esc / ` : Settings",
-  "V: Visualizer",
+  "V: Visualizer  T: Track Info",
   "I:print Close Help",
   "--- SMART FEATURES ---",
   "Web UI: Enable Wi-Fi in",
@@ -195,25 +195,6 @@ String g_currentAlbumArtist = "";
 bool g_albumPlaybackActive = false;         // true when playing within an album
 int g_albumPlaybackIndex = 0;               // index into g_albumSongOffsets for current track
 
-// Marquee scroll state for text that overflows its display area
-struct MarqueeState {
-    int scrollOffset = 0;       // current pixel offset (0 = start)
-    int textWidth = 0;          // total pixel width of text
-    int maxWidth = 0;           // visible area width
-    unsigned long pauseUntil = 0; // millis timestamp: pause at start before scrolling
-    String lastText = "";       // detect text changes to reset
-    void reset() { scrollOffset = 0; pauseUntil = millis() + 2000; }
-    void update(const String& text, int txtW, int maxW) {
-        if (text != lastText) { lastText = text; textWidth = txtW; maxWidth = maxW; reset(); }
-        if (txtW <= maxW) { scrollOffset = 0; return; } // fits, no scroll needed
-        if (millis() < pauseUntil) return; // pausing at start
-        scrollOffset++;
-        if (scrollOffset > txtW - maxW + 10) { scrollOffset = 0; pauseUntil = millis() + 2000; }
-    }
-};
-MarqueeState g_marqueeTitle;    // now-playing title
-MarqueeState g_marqueeArtist;   // visualizer artist
-MarqueeState g_marqueeAlbum;    // visualizer album
 
 // ==========================================
 // HARDWARE CLASSES (FFT & SPEAKER)
@@ -1359,6 +1340,42 @@ public:
         M5Cardputer.Display.print("Enter:Play ;/.:Scroll  `:Close");
     }
 
+    static void drawTrackInfo() {
+        drawPopup("NOW PLAYING", "Press 'T' to Close");
+        int px = 15, py = 15;
+        int contentY = py + 25;
+        int lineHeight = 14;
+        M5Cardputer.Display.setFont(&fonts::Font0);
+
+        String title = audioApp.currentTitle.length() > 0 ? audioApp.currentTitle : "(unknown)";
+        String artist = audioApp.currentArtist.length() > 0 ? audioApp.currentArtist : "(unknown)";
+        String album = audioApp.currentAlbum.length() > 0 ? audioApp.currentAlbum : "(unknown)";
+
+        // Label + value pairs, wrapping long values to 2 lines
+        M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.setCursor(px + 8, contentY);
+        M5Cardputer.Display.print("Title:");
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 8, contentY + lineHeight);
+        M5Cardputer.Display.print(title.substring(0, 28));
+
+        M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.setCursor(px + 8, contentY + lineHeight * 2);
+        M5Cardputer.Display.print("Artist:");
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 50, contentY + lineHeight * 2);
+        M5Cardputer.Display.print(artist.substring(0, 22));
+
+        M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.setCursor(px + 8, contentY + lineHeight * 3);
+        M5Cardputer.Display.print("Album:");
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 50, contentY + lineHeight * 3);
+        M5Cardputer.Display.print(album.substring(0, 22));
+
+        int elapsed = audioApp.getElapsedSec(), total = audioApp.getTotalSec();
+        char timeStr[32];
+        sprintf(timeStr, "%d:%02d / %d:%02d", elapsed / 60, elapsed % 60, total / 60, total % 60);
+        M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.setCursor(px + 8, contentY + lineHeight * 4);
+        M5Cardputer.Display.print("Time:");
+        M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.setCursor(px + 50, contentY + lineHeight * 4);
+        M5Cardputer.Display.print(timeStr);
+    }
+
     static void drawHelp() {
         drawPopup("CONTROLS & HELP", "Press 'I' to Exit");
         int px = 15, py = 15;
@@ -1616,11 +1633,7 @@ public:
     // Full redraw of the now-playing area — called on state changes (play, pause, next, etc.)
     static void drawNowPlaying() {
         int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 5;
-        int areaW = M5Cardputer.Display.width() - xStart;
-        // Clear status line (row 0), progress bar area (row 2), and volume area (row 3)
-        // but NOT the title row (row 1) — the marquee handles that to avoid flicker
-        M5Cardputer.Display.fillRect(xStart, yStart, areaW, 16, C_BG_DARK);           // status line
-        M5Cardputer.Display.fillRect(xStart, yStart + 27, areaW, 23, C_BG_DARK);      // progress + volume area
+        M5Cardputer.Display.fillRect(xStart, yStart, M5Cardputer.Display.width() - xStart, 50, C_BG_DARK);
 
         M5Cardputer.Display.setFont(&fonts::lgfxJapanGothic_12); M5Cardputer.Display.setTextColor(audioApp.isPaused ? TFT_ORANGE : C_PLAYING);
         M5Cardputer.Display.setCursor(xStart + 5, yStart); M5Cardputer.Display.print(audioApp.isPaused ? "[PAUSED]" : "PLAYING >");
@@ -1634,31 +1647,14 @@ public:
             case LOOP_ONE: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("ONE"); break;
         }
 
-        // Draw title immediately (marquee will take over for periodic updates)
-        drawMarqueeTitle();
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(xStart + 5, yStart + 16);
+        if (audioApp.currentTitle.length() > 0) M5Cardputer.Display.print(audioApp.currentTitle.substring(0, 15));
+
         drawProgressBar();
 
         int volY = yStart + 42; M5Cardputer.Display.setCursor(xStart + 5, volY); M5Cardputer.Display.setFont(&fonts::Font0);
         M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("VOL "); M5Cardputer.Display.drawRect(xStart + 30, volY, 60, 6, C_BG_LIGHT);
         M5Cardputer.Display.fillRect(xStart + 31, volY + 1, (M5Cardputer.Speaker.getVolume() * 58) / 255, 4, C_ACCENT);
-    }
-
-    // Title marquee update — called periodically for smooth scrolling
-    static void drawMarqueeTitle() {
-        String title = audioApp.currentTitle.length() > 0 ? audioApp.currentTitle : "";
-        int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 5;
-        int titleAreaW = M5Cardputer.Display.width() - xStart - 10;
-        int titleX = xStart + 5, titleY = yStart + 16;
-        // Must set font BEFORE measuring text width — the title uses lgfxJapanGothic_12
-        M5Cardputer.Display.setFont(&fonts::lgfxJapanGothic_12);
-        int txtW = M5Cardputer.Display.textWidth(title.c_str());
-        g_marqueeTitle.update(title, txtW, titleAreaW);
-        M5Cardputer.Display.fillRect(titleX, titleY, titleAreaW, 14, C_BG_DARK);
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
-        M5Cardputer.Display.setClipRect(titleX, titleY, titleAreaW, 14);
-        M5Cardputer.Display.setCursor(titleX - g_marqueeTitle.scrollOffset, titleY);
-        M5Cardputer.Display.print(title);
-        M5Cardputer.Display.clearClipRect();
     }
 
     // Progress bar only — called every second in the loop, no flicker
@@ -1676,29 +1672,12 @@ public:
         M5Cardputer.Display.fillRect(xStart, yStart+30, min(curW, maxW), 3, C_HIGHLIGHT); M5Cardputer.Display.fillCircle(xStart + min(curW, maxW), yStart+30+1, 3, C_TEXT_MAIN);
     }
 
-    static void drawVisNowPlayingInfo(int textX, int maxPixelW) {
+    static void drawVisNowPlayingInfo(int textX, int maxChars) {
         String artist = audioApp.currentArtist.length() > 0 ? audioApp.currentArtist : "Unknown Artist";
         String album = audioApp.currentAlbum.length() > 0 ? audioApp.currentAlbum : "Unknown Album";
         visSprite.setFont(&fonts::Font0);
-
-        // Artist with marquee
-        int artistW = visSprite.textWidth(artist.c_str());
-        g_marqueeArtist.update(artist, artistW, maxPixelW);
-        visSprite.setTextColor(C_TEXT_MAIN);
-        visSprite.setClipRect(textX, 0, maxPixelW, 12);
-        visSprite.setCursor(textX - g_marqueeArtist.scrollOffset, 4);
-        visSprite.print(artist);
-        visSprite.clearClipRect();
-
-        // Album with marquee
-        int albumW = visSprite.textWidth(album.c_str());
-        g_marqueeAlbum.update(album, albumW, maxPixelW);
-        visSprite.setTextColor(C_TEXT_DIM);
-        visSprite.setClipRect(textX, 12, maxPixelW, 12);
-        visSprite.setCursor(textX - g_marqueeAlbum.scrollOffset, 16);
-        visSprite.print(album);
-        visSprite.clearClipRect();
-
+        visSprite.setTextColor(C_TEXT_MAIN); visSprite.setCursor(textX, 4); visSprite.print(artist.substring(0, maxChars));
+        visSprite.setTextColor(C_TEXT_DIM); visSprite.setCursor(textX, 16); visSprite.print(album.substring(0, maxChars));
         int elapsedSec = audioApp.getElapsedSec();
         int totalSec = audioApp.getTotalSec();
         char timeStr[16];
@@ -1760,7 +1739,7 @@ public:
                     break;
                 }
             }
-            drawVisNowPlayingInfo(45, 73);
+            drawVisNowPlayingInfo(45, 12);
             visSprite.pushSprite(PLAYLIST_WIDTH + 2, HEADER_HEIGHT + 55);
             return;
         }
@@ -1768,7 +1747,7 @@ public:
         if (userSettings.visMode == 4) {
             // Text-only info — no animation, full width for text
             visSprite.fillScreen(C_BG_DARK);
-            drawVisNowPlayingInfo(4, 112);
+            drawVisNowPlayingInfo(4, 18);
             visSprite.pushSprite(PLAYLIST_WIDTH + 2, HEADER_HEIGHT + 55);
             return;
         }
@@ -2894,7 +2873,6 @@ void loop() {
         static unsigned long lastVis = 0; if (millis() - lastVis > 30) { UIManager::drawVisualizer(); lastVis = millis(); }
         static unsigned long lastBat = 0; if (millis() - lastBat > 10000) { UIManager::drawBattery(); lastBat = millis(); }
         static unsigned long lastProg = 0; if (millis() - lastProg > 1000) { UIManager::drawProgressBar(); lastProg = millis(); }
-        static unsigned long lastMarquee = 0; if (millis() - lastMarquee > 50) { UIManager::drawMarqueeTitle(); lastMarquee = millis(); }
     }
 
     if (userSettings.timeoutIndex > 0 && !isScreenOff) {
@@ -2917,6 +2895,7 @@ void loop() {
             case UI_PLAYER:
                 if (M5Cardputer.Keyboard.isKeyPressed('`')) { currentState = UI_SETTINGS; UIManager::drawSettings(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed('i')) { currentState = UI_HELP; UIManager::drawHelp(); }
+                else if (M5Cardputer.Keyboard.isKeyPressed('t')) { currentState = UI_TRACK_INFO; UIManager::drawTrackInfo(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
                     if (g_sidebarRows.size() > 0) {
                         g_sidebarCursor = (g_sidebarCursor - 1 + g_sidebarRows.size()) % g_sidebarRows.size();
@@ -3059,9 +3038,15 @@ void loop() {
                 }
                 break;
 
+            case UI_TRACK_INFO:
+                if (M5Cardputer.Keyboard.isKeyPressed('t') || M5Cardputer.Keyboard.isKeyPressed('`')) {
+                    currentState = UI_PLAYER; UIManager::drawBaseUI();
+                }
+                break;
+
             case UI_HELP:
-                if (M5Cardputer.Keyboard.isKeyPressed('i') || M5Cardputer.Keyboard.isKeyPressed('`')) { 
-                    currentState = UI_PLAYER; UIManager::drawBaseUI(); 
+                if (M5Cardputer.Keyboard.isKeyPressed('i') || M5Cardputer.Keyboard.isKeyPressed('`')) {
+                    currentState = UI_PLAYER; UIManager::drawBaseUI();
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
                     UIManager::helpScrollOffset--;
