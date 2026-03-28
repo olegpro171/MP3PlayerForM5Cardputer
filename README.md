@@ -1,4 +1,4 @@
-# M5Cardputer Music Player
+# M5Cardplayer ADV
 
 A feature-rich portable music player for the **M5Stack Cardputer** (ESP32-S3). Supports MP3, FLAC, AAC, and WAV playback from SD card, with album-based browsing, audio visualizers, Wi-Fi streaming, and a full settings system.
 
@@ -6,7 +6,31 @@ Based on [SanchitMinda's MP3PlayerForM5Cardputer](https://github.com/sanchitmind
 
 ## Note from author
 
-> I would like to say thank you to the original author of this project: [Sanchit Minda](https://github.com/sanchitminda). None of this would have been possible without his work. 
+I wanted a Cardputer audio player that could do two things: automatically group tracks by metadata tags, and look good doing it. 
+I couldn't find one that did both — so I built one instead, forking the MP3PlayerForM5Cardputer by Sanchit Minda as the foundation.
+
+This project started just as a UX pass, but grew into a fairly deep rebuild — album-based navigation, accurate time tracking and a handful of quality-of-life fixes that bothered me enough to actually fix. This readme documents what changed and why.
+
+A huge thank you to [Sanchit Minda](https://github.com/sanchitminda) for the original project. The audio pipeline he figured out made all of this possible.
+
+## Who is this project for
+
+This player is built for people who listen to albums as albums — start to finish, in order, the way the artist intended. If you queue up a record and let it run, this firmware is made for you.
+The core navigation revolves around artists and albums rather than flat song lists. Tracks play in album order by default, shuffle operates within album or artist scope, and the library is organized around metadata tags rather than folder structure. Everything is optimized for the "put on an album and listen" workflow.
+You'll probably enjoy this if you:
+
+- Have a music library organized by artist and album with proper ID3/FLAC tags
+- Like to browse by artist/album/track rather than scroll through one giant list
+- Prefer shuffle modes that respect album or artist context over pure random playback
+
+This project is probably not for you if you:
+
+- Primarily listen to hand-curated playlists mixing tracks from many different artists
+- Have a large collection of untagged or loosely tagged files
+- Want folder-based or playlist-file navigation (that system was intentionally removed in this fork)
+
+If the playlist-first workflow is what you need, at the current time the original project this fork is based on may be a better fit.
+
 
 ## What's New in This Fork
 
@@ -15,6 +39,9 @@ This fork restructures the player around **album-based navigation** and improves
 ### Album Browsing with Artist Groups
 
 The original player showed a flat list of all songs. This fork replaces that with an **album browser grouped by artist**:
+
+> Because of the automatic grouping by artists/albums, it is highly recommended to use this firmware with music files that have metadata tags written. 
+> All files without tags will be located in single 'Unknown artist'->'No Album' group, which might be not optimal for navigation.
 
 - The sidebar shows artists as collapsible headers with their albums indented below
 - Press Enter on an artist to expand/collapse, Enter on an album to see its tracks
@@ -33,11 +60,11 @@ The original player used a hardcoded bytes-per-second constant for time calculat
 - M4A/AAC: mvhd atom duration / timescale
 - WAV: fmt chunk byte rate
 
-Elapsed time is computed as `duration * (bytesPlayed / totalAudioBytes)`, accounting for metadata header offsets. No drift, no float accumulation, survives seek and pause perfectly.
+Elapsed time is computed as `duration * (bytesPlayed / totalAudioBytes)`, accounting for metadata header offsets, which eliminates all possible drift and float accumulation, and perfectly survives seek and pause.
 
 ### Smarter Search
 
-Search now supports **multi-token matching against ID3 tags**. Typing "li fa" finds "Linkin Park - Faint" because "li" matches the artist and "fa" matches the title. The search index includes artist, title, album, and file path, so you can also search by folder name or any combination.
+Search now supports **multi-token fuzzy matching against ID3 tags**. The search index includes artist, title, album, and file path, so you can also search by folder name or any combination.
 
 ### Multi-Scope Shuffle
 
@@ -47,7 +74,7 @@ Four shuffle modes, cycled with the **F** key:
 
 | Display | Mode | Scope |
 |---------|------|-------|
-| `___` | Off | Sequential within album |
+|   | Off | Sequential within album |
 | `SA` | Shuffle Album | All tracks in current album |
 | `SR` | Shuffle Artist | All songs by the current artist, across all their albums |
 | `SG` | Shuffle Global | All songs in the entire library |
@@ -96,6 +123,7 @@ Prev goes backward through the shuffled order. When the queue is exhausted, it r
      - M5Cardputer (by M5Stack)
      - M5Unified (by M5Stack)
      - ESP8266Audio v1.9.7+ (by Earle F. Philhower III)
+   - Set Tools->Partition scheme to 'Huge APP (3MB No OTA/1MB SPIFFS)' 
 
 3. **Flash:**
    - Open `MP3PlayerM5Cardputer.ino`
@@ -167,19 +195,6 @@ Accessible via Esc key. Navigate with ; / . and adjust with / / , keys.
 5. **Now Playing** - Text-only artist, album, and time (full width)
 6. **OFF** - No visualizer
 
-Modes 4 and 5 remain visible when playback is paused.
-
-## Wi-Fi / Web Streaming
-
-Enable Wi-Fi in settings to stream music from the Cardputer to any device on the network:
-
-1. Set Wi-Fi mode: STA (connect to router) or AP (broadcast own network)
-2. Configure network credentials
-3. Enable Wi-Fi power and restart
-4. The IP address appears in the header bar
-5. Navigate to that IP in a browser for the Web UI
-
-Wi-Fi forces 240MHz CPU for network stability, overriding power saver.
 
 ## File Structure
 

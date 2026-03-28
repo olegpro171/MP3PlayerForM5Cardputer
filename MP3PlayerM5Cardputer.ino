@@ -368,46 +368,62 @@ const uint32_t sampleRateValues[] = { 44100, 48000, 88200, 96000, 128000 };
 const char* sampleRateLabels[] = { "44.1k", "48k", "88.2k", "96k", "128k" };
 const long timeoutValues[] = { 15000, 30000, 60000, 120000, 300000, 900000 };
 const char* timeoutLabels[] = { "15 Sec", "30 Sec", "1 Min", "2 Min", "5 Min", "15 Min" };
-const int brightnessValues[] = { 5, 40, 80, 140, 255 };
-const char* brightnessLabels[] = { "2%", "25%", "50%", "75%", "100%" };
-const char* powerModeLabels[] = { "OFF", "Medium (160 MHz)", "High (80 MHz)" };
+const int brightnessValues[] = { 10, 40, 80, 140, 255 };
+const char* brightnessLabels[] = { "10%", "25%", "50%", "75%", "100%" };
+const char* powerModeLabels[] = { "OFF", "Medium", "High" };
 const char* helpLines[] = {
-  "--- MUSIC PLAYER ---",
-  "Enter: Open Album  P: Pause",
-  "; / . : Scroll Albums/Songs",
+  "--- Player Controls ---",
+  "Enter: Open Album",
+  "P: Pause/Play",
+  "; / . : Scroll",
   "[ / ] : Volume - / +",
-  "N / B : Next / Prev Song",
-  "/ / , : Seek +Xs / -Xs",
+  "B / N : Prev / Next",
+  ", / / : Rewind",
   "S: Search",
-  "F: Shuffle (SA/SR/SG)",
+  "F: Shuffle",
+  "   SA - Shuffle album",
+  "   SR - Shuffle artist",
+  "   SG - Shuffle global",
   "L: Loop (1x/LP/1T)",
-  "E: Expand  Q: Collapse all",
-  "Esc / ` : Settings",
-  "V: Visualizer  T: Track Info",
-  "I: Close Help",
-  "--- SMART FEATURES ---",
+  "   1x - Play album once",
+  "   LP - Loop album",
+  "   1T - Loop one track",
+  "E: Expand all",
+  "Q: Collapse all",
+  "Esc: Settings",
+  "V: Visualizer / Info",
+  "T: Full track info",
+  "I / Esc: Close Help",
+  "Hold Esc on boot: Reset",
+  "all settings",
+  "",
+  "--- Extra Features ---",
+  #ifdef ENABLE_WIFI
   "Web UI: Enable Wi-Fi in",
   "settings to access.",
-  "Power Saver: Underclock",
+  #endif
+  "Power Saving: Underclock",
   "CPU to save battery life.",
   "",
-  "--- POCKET MODE ---",
-  "Btn A (1 Click): Play/Pause",
-  "Btn A (2 Clicks): Next",
-  "Btn A (3 Clicks): Prev",
-  "Press any key to wake screen",
-  "Hold Esc on boot: Reset",
+  "--- Pocket Mode ---",
+  "Press G0 button:",
+  "1 Click: Play/Pause",
+  "2 Clicks: Next track",
+  "3 Clicks: Previous track",
   "",
-  "--- ABOUT ---",
-  "Fork of SaM player",
+  "--- About ---",
+  "Fork of SAM player",
   "made by Oleg Proshkin.",
-  "original author",
+  "Original author:",
   "Sanchit Minda.",
   "---",
-  "GH: github.com/sanchitminda",
-  "Share your suggestions!"
+  "GH: github.com/oleg.pro171",
+  "Share your suggestions!",
+  "",
+  "",
+  "",
 };
-const int numHelpLines = 34;
+const int numHelpLines = sizeof(helpLines) / sizeof(helpLines[0]);
 // Settings menu layout: cases 0-3 are common, then Wi-Fi cases (if enabled), then the rest
 // Settings menu layout
 // 0: Brightness, 1: Screen Time-Out, 2: Power Saving, 3: Theme,
@@ -1757,15 +1773,14 @@ public:
 
                 if (isSelected) {
                     M5Cardputer.Display.fillRect(2, yPos - 1, M5Cardputer.Display.width() - 4, ROW_HEIGHT, C_ACCENT);
-                    M5Cardputer.Display.setTextColor(C_BG_DARK);
-                } else if (isPlaying) {
-                    M5Cardputer.Display.setTextColor(C_PLAYING);
+                    M5Cardputer.Display.setTextColor(TFT_BLACK);
                 } else {
                     M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
                 }
 
-                M5Cardputer.Display.setCursor(6, yPos + 2);
-                if (isPlaying && !isSelected) M5Cardputer.Display.print("> ");
+                M5Cardputer.Display.setCursor(6, yPos);
+                // Originally i made "> " prefix disappear when track is selected, but i think we should keep the prefix.
+                if (isPlaying /*&& !isSelected*/) M5Cardputer.Display.print("> ");
                 String disp = (ri < (int)g_searchDisplay.size()) ? truncateToFit(g_searchDisplay[ri], 228) : "";
                 M5Cardputer.Display.print(disp);
                 yPos += ROW_HEIGHT;
@@ -1832,13 +1847,13 @@ public:
     }
 
     static void drawHelp() {
-        drawPopup("CONTROLS & HELP", "Press 'I' to Exit");
+        drawPopup("Controls & Info", "'I' or 'Esc' to Exit");
         int px = 15, py = 15;
         int contentY = py + 25;
-        int lineHeight = 12;
-        int visibleLines = 7;
+        int lineHeight = 16;
+        int visibleLines = 5;
 
-        M5Cardputer.Display.setFont(&fonts::Font0);
+        M5Cardputer.Display.setFont(TAG_FONT);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
 
         for (int i = 0; i < visibleLines; i++) {
@@ -1855,10 +1870,22 @@ public:
 
     static void drawPopup(const char* title, const char* footer) {
         int px = 15, py = 15, pw = 210, ph = 120;
-        M5Cardputer.Display.fillRoundRect(px, py, pw, ph, 4, C_BG_LIGHT); M5Cardputer.Display.drawRoundRect(px, py, pw, ph, 4, C_ACCENT);
-        M5Cardputer.Display.fillRoundRect(px+2, py+2, pw-4, 18, 2, C_HEADER); M5Cardputer.Display.setFont(&fonts::Font0);
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 8, py + 5); M5Cardputer.Display.print(title);
-        if (footer) { M5Cardputer.Display.setCursor(px + 10, py + ph - 15); M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.print(footer); }
+
+        M5Cardputer.Display.fillRoundRect(px, py, pw, ph, 4, C_BG_LIGHT);
+        M5Cardputer.Display.drawRoundRect(px, py, pw, ph, 4, C_ACCENT);
+        M5Cardputer.Display.fillRoundRect(px+2, py+2, pw-4, 18, 2, C_HEADER);
+
+        M5Cardputer.Display.setFont(TAG_FONT);
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); 
+        M5Cardputer.Display.setCursor(px + 8, py + 5);
+        M5Cardputer.Display.print(title);
+
+        if (footer) 
+        { 
+            M5Cardputer.Display.setCursor(px + 10, py + ph - 15); 
+            M5Cardputer.Display.setTextColor(C_TEXT_DIM); 
+            M5Cardputer.Display.print(footer); 
+        }
     }
 
     static void drawHeader() {
@@ -1947,9 +1974,16 @@ public:
                 } else {
                     M5Cardputer.Display.setTextColor(C_HIGHLIGHT);
                 }
-                String prefix = expanded ? "- " : "+ ";
+
+                String artist = (row.dataIdx >= 0 && row.dataIdx < (int)g_artistNames.size()) ? g_artistNames[row.dataIdx] : "";
+                bool isCurrentArtist = (audioApp.currentArtist.length() > 0 && artist == audioApp.currentArtist);
+                String prefix;
+                if (isCurrentArtist) 
+                    prefix = "> ";
+                else
+                    prefix = expanded ? "- " : "+ ";
                 String dispName = truncateToFit(prefix + name, 114);
-                M5Cardputer.Display.setCursor(xPos + 3, yPos + 3);
+                M5Cardputer.Display.setCursor(xPos + 3, yPos + 1);
                 M5Cardputer.Display.print(dispName);
             } else {
                 // Album row (indented)
@@ -1965,7 +1999,7 @@ public:
                 }
                 String prefix = (isCurrentAlbum && !isSelected) ? "> " : "  ";
                 String dispName = truncateToFit(prefix + name, 108);
-                M5Cardputer.Display.setCursor(xPos + 5, yPos + 3);
+                M5Cardputer.Display.setCursor(xPos + 5, yPos + 1);
                 M5Cardputer.Display.print(dispName);
             }
             yPos += ROW_HEIGHT;
@@ -2082,13 +2116,16 @@ public:
                     M5Cardputer.Display.fillRect(2, yPos - 1, M5Cardputer.Display.width() - 4, ROW_HEIGHT, C_ACCENT);
                     M5Cardputer.Display.setTextColor(C_BG_DARK);
                 } else if (isPlaying) {
-                    M5Cardputer.Display.setTextColor(TFT_RED);
+                    if (userSettings.themeIndex == 2) // Retro Amber theme
+                        M5Cardputer.Display.setTextColor(C_HIGHLIGHT);
+                    else
+                        M5Cardputer.Display.setTextColor(C_PLAYING);
                 } else {
                     M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
                 }
 
-                M5Cardputer.Display.setCursor(6, yPos + 2);
-                if (isPlaying && !isSelected) M5Cardputer.Display.print("> ");
+                M5Cardputer.Display.setCursor(6, yPos);
+                if (isPlaying /* && !isSelected */) M5Cardputer.Display.print("> ");
                 M5Cardputer.Display.print(rows[i].displayName);
                 yPos += ROW_HEIGHT;
             }
@@ -2299,7 +2336,7 @@ public:
 
     static void drawSettings() {
         drawPopup("SETTINGS", "Press 'Esc' to Exit");
-        int startY = 45, gap = 20;
+        int startY = 40, gap = 20;
         int items = numSettings;
         for (int i = 0; i < 4; i++) {
             int idx = menuScrollOffset + i; if (idx >= items) break;
@@ -2312,7 +2349,7 @@ public:
                 case 2: M5Cardputer.Display.printf("Power Saving: %s", powerModeLabels[userSettings.powerSaverMode]); break;
                 case 3: M5Cardputer.Display.printf("Theme: %s", themeLabels[userSettings.themeIndex]); break;
                 case 4: M5Cardputer.Display.printf("Boot Animation: %s", userSettings.showSplash ? "ON" : "OFF"); break;
-                case 5: M5Cardputer.Display.printf("Rewind Speed: %ds", userSettings.seek); break;
+                case 5: M5Cardputer.Display.printf("Rewind Step: %d Sec", userSettings.seek); break;
                 case 6: M5Cardputer.Display.printf("Sample Rate: %s", sampleRateLabels[userSettings.spkRateIndex]); break;
 #ifdef ENABLE_WIFI
                 case IDX_WIFI_POWER: M5Cardputer.Display.printf("Wi-Fi: %s", userSettings.wifiEnabled ? "ON" : "OFF"); break;
