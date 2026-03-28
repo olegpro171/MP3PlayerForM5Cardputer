@@ -1340,44 +1340,48 @@ public:
         M5Cardputer.Display.print("Enter:Play ;/.:Scroll  `:Close");
     }
 
+    // Draw a label + value that wraps to next line if needed. Returns updated y.
+    static int drawTagLine(int px, int y, int lh, int maxW, const char* label, const String& value, uint16_t labelColor, uint16_t valueColor) {
+        M5Cardputer.Display.setTextColor(labelColor);
+        M5Cardputer.Display.setCursor(px + 8, y);
+        M5Cardputer.Display.print(label);
+        int labelW = M5Cardputer.Display.textWidth(label);
+        int remaining = (maxW - labelW) / 6; // chars that fit after label on same line
+        M5Cardputer.Display.setTextColor(valueColor);
+        M5Cardputer.Display.setCursor(px + 8 + labelW, y);
+        if ((int)value.length() <= remaining) {
+            M5Cardputer.Display.print(value);
+            return y + lh;
+        }
+        M5Cardputer.Display.print(value.substring(0, remaining));
+        y += lh;
+        // Wrap remaining text
+        int pos = remaining;
+        int fullLine = maxW / 6;
+        while (pos < (int)value.length()) {
+            M5Cardputer.Display.setCursor(px + 8, y);
+            M5Cardputer.Display.print(value.substring(pos, pos + fullLine));
+            pos += fullLine;
+            y += lh;
+        }
+        return y;
+    }
+
     static void drawTrackInfo() {
-        drawPopup("NOW PLAYING", "Press 'T' to Close");
+        drawPopup("TRACK INFO", "Press 'T' to Close");
         int px = 15, py = 15;
         int y = py + 25;
-        int lh = 11; // line height — compact to fit more
-        int maxChars = 32; // full popup width at Font0
+        int lh = 11;
+        int maxW = 194; // popup content width in pixels
         M5Cardputer.Display.setFont(&fonts::Font0);
 
         String title = audioApp.currentTitle.length() > 0 ? audioApp.currentTitle : "(unknown)";
         String artist = audioApp.currentArtist.length() > 0 ? audioApp.currentArtist : "(unknown)";
         String album = audioApp.currentAlbum.length() > 0 ? audioApp.currentAlbum : "(unknown)";
 
-        // Title — label on one line, value on next (may use 2 lines if very long)
-        M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.setCursor(px + 8, y);
-        M5Cardputer.Display.print("Title:"); y += lh;
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 8, y);
-        M5Cardputer.Display.print(title.substring(0, maxChars)); y += lh;
-        if (title.length() > maxChars) { M5Cardputer.Display.setCursor(px + 8, y); M5Cardputer.Display.print(title.substring(maxChars, maxChars * 2)); y += lh; }
-
-        // Artist
-        M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.setCursor(px + 8, y);
-        M5Cardputer.Display.print("Artist:"); y += lh;
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 8, y);
-        M5Cardputer.Display.print(artist.substring(0, maxChars)); y += lh;
-
-        // Album
-        M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.setCursor(px + 8, y);
-        M5Cardputer.Display.print("Album:"); y += lh;
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 8, y);
-        M5Cardputer.Display.print(album.substring(0, maxChars)); y += lh;
-
-        // Time
-        int elapsed = audioApp.getElapsedSec(), total = audioApp.getTotalSec();
-        char timeStr[32];
-        sprintf(timeStr, "%d:%02d / %d:%02d", elapsed / 60, elapsed % 60, total / 60, total % 60);
-        M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.setCursor(px + 8, y);
-        M5Cardputer.Display.print("Time: ");
-        M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print(timeStr);
+        y = drawTagLine(px, y, lh, maxW, "Title: ", title, C_ACCENT, C_TEXT_MAIN);
+        y = drawTagLine(px, y, lh, maxW, "Artist: ", artist, C_ACCENT, C_TEXT_MAIN);
+        y = drawTagLine(px, y, lh, maxW, "Album: ", album, C_ACCENT, C_TEXT_MAIN);
     }
 
     static void drawHelp() {
