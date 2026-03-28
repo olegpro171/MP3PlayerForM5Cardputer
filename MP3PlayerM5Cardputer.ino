@@ -103,7 +103,7 @@ const char* helpLines[] = {
   "E: Expand  Q: Collapse all",
   "Esc / ` : Settings",
   "V: Visualizer  T: Track Info",
-  "I:print Close Help",
+  "I: Close Help",
   "--- SMART FEATURES ---",
   "Web UI: Enable Wi-Fi in",
   "settings to access.",
@@ -1011,19 +1011,22 @@ public:
         stop(); if (songOffsets.empty()) return false;
         currentIndex = index; browserIndex = index; currentTitle = ""; currentArtist = ""; currentAlbum = "";
         String fname = getSongPath(currentIndex);
+        if (fname.length() == 0) return false;
 
         file = new AudioFileSourceSD(fname.c_str());
-        buff = new AudioFileSourceBuffer(file, 16384); 
-        id3 = new AudioFileSourceID3(buff); 
+        buff = new AudioFileSourceBuffer(file, 16384);
+        id3 = new AudioFileSourceID3(buff);
+        if (!file || !buff || !id3) { stop(); return false; }
         id3->RegisterMetadataCB(MDCallback, (void*)"ID3TAG");
-        
+
         if (startPos > 0) id3->seek(startPos, 1);
         String fnameLower = fname; fnameLower.toLowerCase();
         if (fnameLower.endsWith(".flac")) decoder = new AudioGeneratorFLAC();
         else if (fnameLower.endsWith(".m4a") || fnameLower.endsWith(".aac")) decoder = new AudioGeneratorAAC();
         else if (fnameLower.endsWith(".wav")) decoder = new AudioGeneratorWAV();
         else decoder = new AudioGeneratorMP3();
-        
+        if (!decoder) { stop(); return false; }
+
         isPaused = false;
         lookupSongMeta(currentIndex);
         bool ok = decoder->begin(id3, out);
