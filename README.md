@@ -15,7 +15,7 @@ A huge thank you to [Sanchit Minda](https://github.com/sanchitminda) for the ori
 
 ## Who is this project for
 
-This player is built for people who listen to albums as albums — start to finish, in order, the way the artist intended. If you queue up a record and let it run, this firmware is made for you.
+At current point in time, this player is only built for people who listen to albums as albums — start to finish, in order, the way the artist intended. If you queue up a record and let it run, this firmware is made for you.
 The core navigation revolves around artists and albums rather than flat song lists. Tracks play in album order by default, shuffle operates within album or artist scope, and the library is organized around metadata tags rather than folder structure. Everything is optimized for the "put on an album and listen" workflow.
 You'll probably enjoy this if you:
 
@@ -79,8 +79,8 @@ Four shuffle modes, cycled with the **F** key:
 
 | Display | Mode | Scope |
 |---------|------|-------|
-|   | Off | Sequential within album |
-| `SA` | Shuffle Album | All tracks in current album |
+|      | Off            | Sequential within album |
+| `SA` | Shuffle Album  | All tracks in current album |
 | `SR` | Shuffle Artist | All songs by the current artist, across all their albums |
 | `SG` | Shuffle Global | All songs in the entire library |
 
@@ -107,13 +107,25 @@ Prev goes backward through the shuffled order. When the queue is exhausted, it r
 
 ### Removed
 
-- **Folder/playlist system**: The original let you filter songs by folder. Since albums are now the primary navigation, folder filtering was removed entirely.
+- **Folder/playlist system**: The original let you filter songs by folder. Since albums are now the primary navigation, folder filtering was removed.
+
+## What's coming
+
+I plan to add following features in the future:
+
+- Search artists and albums in home view
+- 'Favourites' list with ability to add and remove items directly from Cardputer
+- Editor for metadata tags and more.
+
+I'm currently thinking about how i can integrate playlist functionality intlo this project while keeping it actually usable. 
+Only after creation, editing and deleteng pipelines will be thought through, i'm planning to implement the playlist support.
+
 
 ## Hardware Requirements
 
 - **M5Stack Cardputer** (ESP32-S3 based)
 - **MicroSD Card** (FAT32 formatted)
-- Audio files: MP3, FLAC, M4A/AAC, WAV
+- Audio files (MP3, FLAC, M4A/AAC, WAV) with written metadata tags.
 
 ## Installation
 

@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////
-/// Made by: Sanchit Minda() | Github/sanchitminda
-/// Fully Functional OOP & State Machine Architecture
+/// Fork by: Oleg Proshkin.              | https://github.com/olegpro171
+/// Original project by: Sanchit Minda() | https://github.com/sanchitminda
 //////////////////////////////////////////////
 
 // Comment out to disable Wi-Fi/Web streaming and reduce firmware size
@@ -412,8 +412,8 @@ const char* helpLines[] = {
   "3 Clicks: Previous track",
   "",
   "--- About ---",
-  "Fork of SAM player",
-  "made by Oleg Proshkin.",
+  "M5Cardplayer",
+  "fork made by Oleg Proshkin.",
   "Original author:",
   "Sanchit Minda.",
   "---",
