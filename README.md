@@ -36,6 +36,11 @@ If the playlist-first workflow is what you need, at the current time the origina
 
 This fork restructures the player around **album-based navigation** and improves the overall experience for listening to full albums on the Cardputer's small screen.
 
+### Cyrillic support
+
+A built-in Cyrillic keyboard layout is available in search, so you can type queries in Russian (or other Cyrillic-script languages) directly on the Cardputer's keyboard without any workarounds.
+If your library includes tracks with Cyrillic metadata — artist names, album titles, and track names in Russian and other Cyrillic languages are fully supported.
+
 ### Album Browsing with Artist Groups
 
 The original player showed a flat list of all songs. This fork replaces that with an **album browser grouped by artist**:
