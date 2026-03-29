@@ -2,14 +2,20 @@
 /// Made by: Sanchit Minda() | Github/sanchitminda
 /// Fully Functional OOP & State Machine Architecture
 //////////////////////////////////////////////
+
+// Comment out to disable Wi-Fi/Web streaming and reduce firmware size
+// #define ENABLE_WIFI
+
 #include <vector>
 #include <M5Unified.h>
 #include <M5Cardputer.h>
 #include <SPI.h>
 #include <Preferences.h>
 #include <nvs_flash.h>
+#ifdef ENABLE_WIFI
 #include <WiFi.h>
 #include <WebServer.h>
+#endif
 #include "USB.h"
 #include "USBMSC.h"
 
@@ -30,7 +36,6 @@
 #define SD_SPI_MOSI_PIN 14
 #define SD_SPI_CS_PIN   12
 #define PLAYLIST_FILE   "/playlist.txt"   // "All Music" flat cache
-#define CONFIG_FILE     "/config.txt"
 #define ALBUM_INDEX_FILE "/albums.idx"
 #define ALBUM_RAW_FILE   "/albums_raw.tmp"
 #define SEARCH_INDEX_FILE "/search.idx"
@@ -44,10 +49,277 @@ struct TagInfo {
     uint32_t audioOffset;   // byte offset where audio data begins (after ID3/metadata headers)
 };
 
+// U8g2 font: 7x13 fixed-width with Cyrillic (Public domain)
+// Source: https://github.com/olikraus/u8g2 — Misc-Fixed-Medium-R-Normal
+static const uint8_t u8g2_font_7x13_cyrillic[4543] PROGMEM =
+"M\0\3\2\3\4\3\5\4\7\15\0\376\11\376\11\0\1p\2\344\4: \5\0\356\7!\7\311\303"
+  "\307!\11\42\7\33\333Gb\11#\16\275\306O)I\6\245\62(\245$\1$\14\275\306W\66(\331"
+  "\226\14Z\4%\20N\302O\246DI\24\246a)\211\22-\1&\15>\302\217\26\265iQ\242EK"
+  "\0'\6\231\333\307\0(\13K\303W\22%Q-\312\2)\14K\303G\26eQ%J\42\0*\14"
+  ".\312O\224I\303\244E\11\0+\12\255\312W\30\15R\30\1,\10\234\276\317\242d\0-\6\215\322"
+  "\307 .\10\33\277O\262$\0/\13\315\302g-\314\212Y\30\2\60\15N\302\227\26%\241\307$\312"
+  "$\0\61\13\315\302W&%aO\203\0\62\16N\302\317\220\204b\32fZ\230\16\3\63\15N\302\307"
+  "\65,\316\251\230\14\11\0\64\17N\302g\250%Q%K\262d\30\323\4\65\16N\302\307!\255,Z"
+  "\232\212\311\220\0\66\16N\302\327\24\246\225E\23\305dH\0\67\14N\302\307\65\254\206i\230\206\0\70"
+  "\17N\302\317\220\204\306dHBc\62$\0\71\15N\302\317\220\204\66eI\213\321\4:\13C\277O"
+  "\262\344H\262$\0;\13\304\276W\64\345\330\242d\0<\10\315\302g\326\265\3=\10&\312\307\35\35"
+  "\6>\11\315\302G\332\255#\0\77\15N\302\317\220\204b\32Vs\60\2@\20N\302\317\220\204\246!"
+  "\211\224dJ\344!\1A\15N\302\227\26%\241q\30Dc\0B\22N\302\307 eI\226d\311\20"
+  "eI\226d\303\2C\14N\302\317\220\204j\217\311\220\0D\22N\302\307 eI\226dI\226dI"
+  "\226d\303\2E\14N\302\307!\255\16QZ\35\6F\13N\302\307!\255\16Q\332\12G\15N\302\317"
+  "\220\204j\323\20j\312\22H\13N\302G\350\70\14\242c\0I\12\315\302\307 \205}\32\4J\13N"
+  "\302\337\230\366\222E\23\0K\20N\302G\250%Q%\23\223,\252%a\0L\11N\302G\332\257\303"
+  "\0M\13N\302G\70\15\321\342\321\61N\15N\302G(nJ$%\332h\14O\13N\302\317\220\204"
+  "~L\206\4P\14N\302\307\240\204\306aI[\1Q\16V\276\317\220\204\276DR\222\14q\0R\16"
+  "N\302\307\240\204\306a\251E\265$\14S\17N\302\317\220\204j<\304\251\230\14\11\0T\11\315\302\307"
+  " \205\375\4U\12N\302G\350\217\311\220\0V\14N\302GhL\242\336D\23\0W\13N\302G\350"
+  "\305e\32\242\61X\16N\302G(&Q\233\26\265\204b\0Y\14\315\302G\246%\245$\13;\1Z"
+  "\13N\302\307\65,\212\255\303\0[\11\334\276\307\240\365\267!\134\13\315\302G\230\206i\61\15\3]\11"
+  "\334\276\307\220\365\267A^\10\235\332W\226\324\2_\6\16\276\307\1`\6\22\343G\24a\14\66\302\317"
+  "\20'\303\250)K\0b\15N\302G\332\262h\242\270)\13\0c\14\66\302\317\220\204j\61\31\22\0"
+  "d\13N\302o\313\242\215\66e\11e\15\66\302\317\220\204\303\240\206\311\220\0f\15N\302\327\224%i"
+  "\70di#\0g\17F\272\317\242%Y\64\305C\22&C\2h\13N\302G\332\262h\242c\0i"
+  "\12\305\302W\216\210\235\6\1j\14\325\272g\216\210\215\232\226,\0k\15N\302G\332\226D\321\26\325"
+  "\222\60l\11\315\302\217\330O\203\0m\15\265\302\207\322\242$J\242$Z\0n\12\66\302G\262h\242"
+  "c\0o\13\66\302\317\220\204\216\311\220\0p\14F\272G\262h\342\246,i\25q\13F\272\317\242\215"
+  "\232\262\244\15r\12\66\302G\62eI\332\10s\15\66\302\317\220\204\211\254\204\311\220\0t\14F\302O"
+  "\32\16Y\332\26-\0u\11\66\302G\350MY\2v\13\265\302GfKJI\26\1w\13\265\302G"
+  "fI\224D\351\2x\14\66\302G\230D\231\250EI\30y\15F\272G\350\246,\251\230\14\11\0z"
+  "\10\66\302\307\261\343\60{\14\335\276\327\22V#\65\13\253\3|\6\311\303\307\3}\15\335\276\307\32\326"
+  "R)\15+\23\0~\11\235\332O\244$R\2\0\0\0\10\4d\5\210\377\377\4\0\20V\302W\234"
+  "#\303\220\246C\224\246\303\0\4\1\17V\302O\324>\14i:Di:\14\4\2\16^\272\307\240\245"
+  "\325-\352\327L\1\4\3\14^\302_\230C\303\220\366\25\4\4\17N\302\327\224\251\351\20\245q\26-"
+  "\0\4\5\20N\302\317\220\204j<\304\251\230\14\11\0\4\6\13\315\302\307 \205}\32\4\4\7\15\325"
+  "\302G\246\245\203\24v\32\4\4\10\14N\302\337\230\366\222E\23\0\4\11\21N\302\317\226dI\226d"
+  "\211\224\364\213\244\0\4\12\20N\302G\324O\203\22%R\42%\222\2\4\13\14N\302\307\240\245\325-"
+  "\352\7\4\14\22^\302_\230\205Z\22U\62\61\311\242Z\22\6\4\15\17^\302W\34\205\266)Q\242"
+  "M\64\6\4\16\21^\302O\224\351HhL\6\65\25\223!\1\4\17\14]\272G\346o\303\24F\0"
+  "\4\20\16N\302\227\26%\241q\30Dc\0\4\21\16N\302\307\240\244\325A\11\215\303\2\4\22\16N"
+  "\302\307\240\204\306a\11\215\303\2\4\23\12N\302\307!\355W\0\4\24\20V\276\327\226dI\226D\375"
+  "e\30\302\0\4\25\15N\302\307!\255\16QZ\35\6\4\26\22\315\302G\222(\211\222(\225\245\242$"
+  "J\242\24\4\27\17N\302\317\220\204iiN\305dH\0\4\30\16N\302Gh\233\22%\332Dc\0"
+  "\4\31\20^\302O\224I\241mJ\224h\23\215\1\4\32\21N\302G\250%Q%\23\223,\252%a"
+  "\0\4\33\23N\302\317\240dI\226dI\226dI\226db\0\4\34\14N\302G\70\15\321\342\321\61"
+  "\4\35\14N\302G\350\70\14\242c\0\4\36\14N\302\317\220\204~L\206\4\4\37\12N\302\307!\364"
+  "\307\0\4 \15N\302\307\240\204\306aI[\1\4!\15N\302\317\220\204j\217\311\220\0\4\42\12\315"
+  "\302\307 \205\375\4\4#\16N\302G\350\230\14j*&C\2\4$\24\335\276W\266T\224DI\224"
+  "DI\224D\251l\21\0\4%\17N\302G(&Q\233\26\265\204b\0\4&\24^\272G\226dI"
+  "\226dI\226dI\226d\311\260\26\4'\13N\302G\350\230\14j\7\4(\23\315\302G\222(\211\222"
+  "(\211\222(\211\222(\311\60\4)\14^\272G\322\377\377/\303Z\4*\14N\302\307\332\272E=-"
+  "\0\4+\20N\302G\350\70DR\42%R\62D\1\4,\15\315\302G\330\70$\231mP\0\4-"
+  "\17N\302\317\224\305i\64\244\251\26M\0\4.\23N\302G\244\224\224H\211\206H\211\224H\211,\0"
+  "\4/\17N\302\317\60\32\223AK\242J&\6\4\60\15\66\302\317\20'\303\250)K\0\4\61\20N"
+  "\302o\62$i\262h\242\61\31\22\0\4\62\15\66\302\307\240\204\303\22\212\303\2\4\63\11\66\302\307!"
+  "\355\12\4\64\13>\276\327\324_\206!\14\4\65\16\66\302\317\220\204\303\240\206\311\220\0\4\66\16\265\302"
+  "G\222(\225\245\242$J\1\4\67\15\66\302\317\220\204\321,&C\2\4\70\15\66\302G\250M\211\22"
+  "mb\0\4\71\20N\302O\224\351H\250M\211\22mb\0\4:\15\66\302G\250%C\224%\241\30"
+  "\4;\16\66\302\327\220dI\226dI&\6\4<\13\265\302G\266,\211f\13\4=\13\66\302G("
+  "\16\203h\14\4>\14\66\302\317\220\204\216\311\220\0\4\77\11\66\302\307!\364\30\4@\16F\272G\262"
+  "h\242\270)K\232\2\4A\15\66\302\317\220\204j\61\31\22\0\4B\12\265\302\307 \205\235\0\4C"
+  "\16F\272G\350\246,\251\230\14\11\0\4D\21\325\272W\230-\25%Q\22\245\262\205\21\0\4E\15"
+  "\66\302G\230D\231\250EI\30\4F\20F\272G\226dI\226dI\226\14k\1\4G\13\66\302G"
+  "hL\6\265\0\4H\17\265\302G\222(\211\222(\211\222\14\3\4I\13F\272G\322\377\227a-\4"
+  "J\13\66\302\307\232nQ\323\2\4K\16\66\302G(\16\221\224H\311\20\5\4L\15\265\302G\30\16"
+  "I\246\15\12\0\4M\15\66\302\317\220\204\331*&C\2\4N\16\66\302G\244\224\206H\211\224\310\2"
+  "\4O\15\66\302\317\60\212\311\240db\0\4P\20N\302W\234CC\22\16\203\32&C\2\4Q\21"
+  "N\302O\324\216\14I\70\14j\230\14\11\0\4R\22V\272O\32\16Y:DY\222%Y\232)\0"
+  "\4S\14N\302_\230C\303\220v\5\4T\16\66\302\317\220\204C\226\206\311\220\0\4U\16\66\302\317"
+  "\220\204\211\254\204\311\220\0\4V\13\305\302W\216\210\235\6\1\4W\14\315\302G\224D\271\330i\20\4"
+  "X\15\325\272g\216\210\215\232\226,\0\4Y\17\67\302\317\230\204\311\224DIIZ\0\4Z\16\66\302"
+  "G\324\64(Q\42%\222\2\4[\20F\302O\32\16Y:DY\222%Y\0\4\134\20N\302_\230"
+  "C\241\226\14Q\226\204b\0\4]\17N\302W\234#\241\66%J\264\211\1\4^\21^\272O\224\351"
+  "H\350\246,\251\230\14\11\0\4_\13\305\272G\346m\230\302\10\4`\15N\302O\224\204~QJ\11"
+  "\0\4a\14\265\302O\233\222(\211\322\5\4b\22N\302O\70di:DY\222%Y\62$\0\4"
+  "c\20F\302O\32\16Y:DY\222%C\2\4d\22N\302G\244\224\224,\311\6\245\226dId"
+  "\1\4e\16\66\302G\244\224\6)\311\222\310\2\4f\20\315\302WXK\242$J\222aI\224\2\4"
+  "g\15\265\302W\230%Q\222\14K\1\4h\17N\302G\324\227\312\322e\30\224d)\4i\15\66\302"
+  "G\324\264t\31\6\245\0\4j\17\315\302\307MKj\331RQ\22\245\0\4k\14\265\302\307-)-"
+  "\25\245\0\4l\21N\302\307A\333\224\312\20%\213\222,\311R\4m\16\66\302\307AS*\203\242$"
+  "K\1\4n\23n\272O\224\351\320\220\204i\64\247\225!\211\207\4\4o\23^\272O\224\351\320\220\204"
+  "\321\234&C\22\17\11\0\4p\22\315\302G\222(\211\222(\211\222(\225-\214\0\4q\20\305\272G"
+  "\222(\211\222(\211R\331\302\10\4r\17N\302\317\220\204\306a\20\215\311\220\0\4s\16\66\302\317\220"
+  "\204\303 \212\311\220\0\4t\20N\302G\250%Q\226dI\226\204i\15\4u\15\265\302G&%Q"
+  "%J\262\10\4v\23^\302G\224Ey\250%Q\226dI\226\204i\6\4w\17\315\302G\324\232I"
+  "IT\211\222,\2\4x\21^\272O\230dI\226d\211\277\224\322\60\2\4y\14>\272O\305/\245"
+  "\64\214\0\4z\14\335\276W\266d~K\266\10\4{\13\275\302W\266dn\311\2\4|\17^\302_"
+  "\230cQ\22\372\242\224\22\0\4}\16\315\302_\35iS\22%Q\272\0\4~\17V\302\317\220#Q"
+  "\22\372\242\224\22\0\4\177\16\305\302\317\236\324\224DI\224.\0\4\200\14V\276\327\224\251\235\207\264\2"
+  "\4\201\14F\272\317\220\204jy-\1\4\202\16F\302gT\223\42S\244EE\0\4\203\10\33\343\327"
+  " \1\4\204\10\234\342WE\3\4\205\11\33\343G\64D\0\4\206\10\33\343\327\20\5\4\210\20o\272"
+  "O\232Di\222\363K\232Di\22\4\211\16\355\272O\226-\241\316\232eK(\4\214\20M\302O\66"
+  "Da\70U\242$J\26\0\4\215\14\65\302O\66D\341TY\0\4\216\17N\302\307\240\204R\242%"
+  "C\242\266\2\4\217\16F\272G\262hR\62%\211\265\12\4\220\13^\302o:\14j\277\2\4\221\13"
+  "F\302o:\14jW\0\4\222\14N\302\307!\255\16Q\332\12\4\223\12\265\302\307\61\234\302\20\4\224"
+  "\15]\272\307\61\234*\231[I\2\4\225\14\305\272\307q\252dZI\2\4\226\16^\272G\322\377\64"
+  "%\375\27\265\0\4\227\14F\272G\322\323\224\364\213Z\4\230\20^\272\317\220\204iiN\305d\10k"
+  "\0\4\231\16F\272\317\220\204\321,&CX\3\4\232\21^\272G\250%Q%\23\223,\252%aZ"
+  "\4\233\16F\272G\250%C\224%\241\230\26\4\234\21N\302G\250\264HI\266%Y\42%\215\1\4"
+  "\235\15\66\302G\250T\206(i\24\3\4\236\21N\302O\66DIT\311\304$\213jI\26\4\237\15"
+  "\66\302O\66DI\24mQ-\4\240\20N\302\207\226D\225LL\305$\213j\1\4\241\15\265\302\207"
+  "\224\224\264$\252D\1\4\242\24^\272G\226dI\226d\311\240dI\226dI\246\26\4\243\20F\272"
+  "G\226d\311\240dI\226dj\1\4\244\24O\302G\66dQ\26e\321 eQ\26eQ\26\1\4"
+  "\245\20\67\302G\66d\321 eQ\26e\21\0\4\246\24\335\272\307\224DI\224(\25%Q\22%Q"
+  "\212Y\2\4\247\20\305\272\307\224D\211RQ\22\245\230%\0\4\250\20V\276\327\224\251%\245\244D\311"
+  "\220\305\3\4\251\17F\272\317\220\204j\244\224\222!\213\7\4\252\17^\272\317\220\204j\217\311\220\305\12"
+  "\0\4\253\16F\272\317\220\204j\61\31\262X\1\4\254\14\335\272\307 \205}\24+\0\4\255\13\305\272"
+  "\307 \205\215b\5\4\256\15\335\272G\246%\245$\13\373\4\4\257\13\305\272G\226\324\302\236\0\4\260"
+  "\20\335\272G\246%\245$\13K\203\24\226\0\4\261\16\305\272G\226\324\302\322 \205\21\0\4\262\22_"
+  "\272G\230\204Q-\12\305(\213\212I(\27\4\263\15G\272G\30\25U\61*\312\5\4\264\14^\272"
+  "\307\22\365\377iP\13\4\265\13F\272\307\22\365\247A-\4\266\20^\272G\226dI\226d\321\220\266"
+  "\252\5\4\267\16F\272G\226dI\26\15i\252\26\4\270\17\315\302GfI\224\312\20%Q\22\26\4"
+  "\271\14\265\302Gf\251\14Q\22\6\4\272\14N\302G\332:(\241c\0\4\273\13\66\302G\232\16J"
+  "h\14\4\274\20N\302\237\26%\222\22%C\226\226\62\5\4\275\15\66\302\237RJ\6)\215\62\5\4"
+  "\276\21^\272\237\26%\222\22%C\226\226\62\61\26\4\277\16F\272\237RJ\6)\215\62\61\26\4\300"
+  "\13\315\302\307 \205}\32\4\4\301\23\335\302G\226\314I\242$Je\251(\211\222(\5\4\302\20\315"
+  "\302G\226\314I\242T\226\212\222(\5\4\303\23^\272G\250%Q%\23\223,\252%a\32-\0\4"
+  "\304\20F\272G\250%C\224%\241\230F\13\0\4\307\16^\272G\350\70\14\242cTS\0\4\310\16"
+  "F\272G(\16\203h\214j\12\0\4\313\16^\272G\350\230\14j\243\230&\0\4\314\15F\272Gh"
+  "L\6\65\24\323\4\4\320\21V\302G\230\14\71\244EI(\16\203(\6\4\321\20N\302G\230\14\71"
+  "\62\304\311\60j\312\22\4\322\20V\302O\324\16iQ\22\212\303 \212\1\4\323\17N\302O\324\216\14"
+  "q\62\214\232\262\4\4\324\23N\302O\62$Y\222%YrK\262$K\206\0\4\325\16\66\302\217\22"
+  "&\311\60\265$J\2\4\326\20V\302G\230\14\371\60\244\351\20\245\351\60\4\327\22N\302G\230\14\71"
+  "\62$\341\60\250a\62$\0\4\330\20N\302\317\220\204i:\14\242\61\31\22\0\4\331\16\66\302\317\220"
+  "\204\351\60\210\311\220\0\4\332\21V\302O\324\216\14I\230\16\203(&C\2\4\333\21N\302O\324\216"
+  "\14I\230\16\203\230\14\11\0\4\334\23\335\302O)\211\223DI\224\312RQ\22%Q\12\4\335\20\315"
+  "\302O)\211\223D\251,\25%Q\12\4\336\21^\302O\324\216\14I\230Fs*&C\2\4\337\20"
+  "N\302O\324\216\14I\30\315b\62$\0\4\340\16N\302\307 \26\347\252\230\14\11\0\4\341\15F\272"
+  "\307\261\70\247b\62$\0\4\342\17^\302\317\220\207\266)Q\242M\64\6\4\343\16F\302\317\220\207\332"
+  "\224(\321&\6\4\344\17^\302O\324\36jS\242D\233h\14\4\345\16N\302O\324\36jS\242D"
+  "\233\30\4\346\17V\302O\324\216\14I\350\61\31\22\0\4\347\17N\302O\324\216\14I\350\230\14\11\0"
+  "\4\350\17N\302\317\220\204\306a\20\215\311\220\0\4\351\16\66\302\317\220\204\303 \212\311\220\0\4\352\21"
+  "^\302O\324\216\14I(\16\203hL\206\4\4\353\21N\302O\324\216\14I\70\14\242\230\14\11\0\4"
+  "\354\21^\302O\324\216LY\34\15i\252E\23\0\4\355\21N\302O\324\216\14I\30\15\251\230\14\11"
+  "\0\4\356\20^\302\317\220\207\216\311\240\246b\62$\0\4\357\17V\272\317\220\207n\312\222\212\311\220\0"
+  "\4\360\20^\302O\324\36\32\223AM\305dH\0\4\361\17^\272O\324\36\272)K*&C\2\4"
+  "\362\21^\302W%\312Cc\62\250\251\230\14\11\0\4\363\20^\272W%\312C\67eI\305dH\0"
+  "\4\364\15^\302O\324\36\32\223A\355\0\4\365\14N\302O\324\36\32\223A-\4\370\23^\302W\222"
+  "%yh\34\42)\221\22)\31\242\0\4\371\21N\302W\222%y(\16\221\224H\311\20\5\0";
+
+static const lgfx::U8g2font tagFont(u8g2_font_7x13_cyrillic);
+#define TAG_FONT &tagFont
+
+// Truncate a UTF-8 string to fit within maxPixels at 6px per glyph.
+// Works correctly for both Latin (1 byte) and Cyrillic (2 bytes) UTF-8.
+String truncateToFit(const String& s, int maxPixels) {
+    int charWidth = 7; // 7x13 fixed-width font
+    int maxChars = maxPixels / charWidth;
+    int count = 0, bytePos = 0;
+    while (bytePos < (int)s.length() && count < maxChars) {
+        uint8_t c = (uint8_t)s[bytePos];
+        if (c < 0x80) bytePos += 1;           // ASCII: 1 byte
+        else if ((c & 0xE0) == 0xC0) bytePos += 2; // 2-byte UTF-8
+        else if ((c & 0xF0) == 0xE0) bytePos += 3; // 3-byte UTF-8
+        else bytePos += 4;                     // 4-byte UTF-8
+        count++;
+    }
+    if (bytePos >= (int)s.length()) return s;  // fits entirely
+    // Need truncation — back up one char for "~"
+    String result = s.substring(0, bytePos);
+    // Remove last char to make room for "~"
+    int lastCharStart = bytePos;
+    int pos2 = 0, prevPos = 0;
+    int c2 = 0;
+    while (pos2 < bytePos) {
+        prevPos = pos2;
+        uint8_t ch = (uint8_t)s[pos2];
+        if (ch < 0x80) pos2 += 1;
+        else if ((ch & 0xE0) == 0xC0) pos2 += 2;
+        else if ((ch & 0xF0) == 0xE0) pos2 += 3;
+        else pos2 += 4;
+    }
+    return s.substring(0, prevPos) + "~";
+}
+
+// ==========================================
+// KEYBOARD LAYOUT SYSTEM
+// ==========================================
+// Russian ЙЦУКЕН layout: maps QWERTY key presses to Cyrillic UTF-8
+const char* mapRussian(char c) {
+    static const char* lower[26] = {
+        "\xd1\x84", "\xd0\xb8", "\xd1\x81", "\xd0\xb2", "\xd1\x83", // a-e: ф и с в у
+        "\xd0\xb0", "\xd0\xbf", "\xd1\x80", "\xd1\x88", "\xd0\xbe", // f-j: а п р ш о
+        "\xd0\xbb", "\xd0\xb4", "\xd1\x8c", "\xd1\x82", "\xd1\x89", // k-o: л д ь т щ
+        "\xd0\xb7", "\xd0\xb9", "\xd0\xba", "\xd1\x8b", "\xd0\xb5", // p-t: з й к ы е
+        "\xd0\xb3", "\xd0\xbc", "\xd1\x86", "\xd1\x87", "\xd0\xbd", // u-y: г м ц ч н
+        "\xd1\x8f"                                                     // z:   я
+    };
+    static const char* upper[26] = {
+        "\xd0\xa4", "\xd0\x98", "\xd0\xa1", "\xd0\x92", "\xd0\xa3", // A-E: Ф И С В У
+        "\xd0\x90", "\xd0\x9f", "\xd0\xa0", "\xd0\xa8", "\xd0\x9e", // F-J: А П Р Ш О
+        "\xd0\x9b", "\xd0\x94", "\xd0\xac", "\xd0\xa2", "\xd0\xa9", // K-O: Л Д Ь Т Щ
+        "\xd0\x97", "\xd0\x99", "\xd0\x9a", "\xd0\xab", "\xd0\x95", // P-T: З Й К Ы Е
+        "\xd0\x93", "\xd0\x9c", "\xd0\xa6", "\xd0\xa7", "\xd0\x9d", // U-Y: Г М Ц Ч Н
+        "\xd0\xaf"                                                     // Z:   Я
+    };
+    if (c >= 'a' && c <= 'z') return lower[c - 'a'];
+    if (c >= 'A' && c <= 'Z') return upper[c - 'A'];
+
+    // Extra mappings for the 7 Cyrillic letters without Latin equivalents
+    switch (c) {
+        case '[':  return "\xd1\x85"; // х
+        case '{':  return "\xd0\xa5"; // Х
+        case ']':  return "\xd1\x8a"; // ъ
+        case '}':  return "\xd0\xaa"; // Ъ
+        case ':':  return "\xd0\xb6"; // ж
+        case '\'': return "\xd1\x8d"; // э
+        case '"':  return "\xd0\xad"; // Э
+        case ',':  return "\xd0\xb1"; // б
+        case '>':  return "\xd1\x8e"; // ю
+    }
+    return nullptr;
+}
+
+// Layout table — nullptr means pass-through (English)
+typedef const char* (*LayoutMapFn)(char);
+LayoutMapFn g_layouts[] = { nullptr, mapRussian };
+const char* g_layoutNames[] = { "EN", "RU" };
+#define NUM_LAYOUTS 2
+
+// Remove last UTF-8 character from a String (handles multi-byte Cyrillic)
+void removeLastUtf8Char(String& s) {
+    int len = s.length();
+    if (len == 0) return;
+    int pos = len - 1;
+    while (pos > 0 && ((uint8_t)s[pos] & 0xC0) == 0x80) pos--;
+    s.remove(pos);
+}
+
+// Lowercase a UTF-8 string handling both ASCII and Cyrillic
+// Arduino's toLowerCase() only handles ASCII; Cyrillic bytes are untouched
+String utf8ToLower(const String& s) {
+    String result;
+    result.reserve(s.length());
+    for (int i = 0; i < (int)s.length(); i++) {
+        uint8_t b = (uint8_t)s[i];
+        // ASCII uppercase
+        if (b >= 'A' && b <= 'Z') { result += (char)(b + 32); continue; }
+        // Cyrillic uppercase: 2-byte UTF-8 sequences
+        if (b == 0xD0 && i + 1 < (int)s.length()) {
+            uint8_t b2 = (uint8_t)s[i + 1];
+            // А-П (U+0410-U+041F): \xD0\x90-\xD0\x9F → \xD0\xB0-\xD0\xBF
+            if (b2 >= 0x90 && b2 <= 0x9F) {
+                result += (char)0xD0; result += (char)(b2 + 0x20); i++; continue;
+            }
+            // Р-Я (U+0420-U+042F): \xD0\xA0-\xD0\xAF → \xD1\x80-\xD1\x8F
+            if (b2 >= 0xA0 && b2 <= 0xAF) {
+                result += (char)0xD1; result += (char)(b2 - 0x20); i++; continue;
+            }
+            // Ё (U+0401): \xD0\x81 → \xD1\x91
+            if (b2 == 0x81) {
+                result += (char)0xD1; result += (char)0x91; i++; continue;
+            }
+        }
+        result += (char)b;
+    }
+    return result;
+}
+
 #define PLAYLIST_WIDTH 120
+#define NOW_PLAYING_PADDING_LEFT 3
 #define ROW_HEIGHT 15
 #define HEADER_HEIGHT 20
 #define BOTTOM_BAR_HEIGHT 18
+#define SEARCH_VISIBLE_ROWS 4   // fewer rows than sidebar due to search box taking space
 #define MAX_VISIBLE_ROWS 6  
 
 // --- DYNAMIC COLORS & THEMES ---
@@ -70,10 +342,15 @@ void applyTheme(int index) {
             C_ACCENT = 0x07FF; C_PLAYING = 0xFFE0; C_HIGHLIGHT = 0xF800;
             C_TEXT_MAIN = 0xFFFF; C_TEXT_DIM = 0x7BEF;
             break;
-        case 2: // Retro Amber
-            C_BG_DARK = TFT_BLACK; C_BG_LIGHT = 0x2104; C_HEADER = 0x6A00; 
-            C_ACCENT = 0xFDA0; C_PLAYING = TFT_ORANGE; C_HIGHLIGHT = TFT_RED;
-            C_TEXT_MAIN = 0xFEA0; C_TEXT_DIM = 0xA340;
+        case 2: // Retro Amber — warm orange, no yellow
+            C_BG_DARK = TFT_BLACK;
+            C_BG_LIGHT = 0x0800; 
+            C_HEADER = 0x58e0;
+            C_ACCENT = 0xfc60;
+            C_PLAYING = 0xFBC0;
+            C_HIGHLIGHT = 0xf861; 
+            C_TEXT_MAIN = 0xf480; // 0xF560;
+            C_TEXT_DIM = 0xC2A0; //0x8300;
             break;
         case 3: // Hacker Green
             C_BG_DARK = 0x0000; C_BG_LIGHT = 0x0180; C_HEADER = 0x0320; 
@@ -84,59 +361,95 @@ void applyTheme(int index) {
 }
 
 enum LoopState { NO_LOOP, LOOP_ALL, LOOP_ONE };
+enum ShuffleMode { SHUF_OFF, SHUF_ALBUM, SHUF_ARTIST, SHUF_GLOBAL };
 enum UIState { UI_PLAYER, UI_SETTINGS, UI_HELP, UI_WIFI_SCAN, UI_TEXT_INPUT, UI_SEARCH, UI_ALBUM_SONGS, UI_TRACK_INFO };
 
 const uint32_t sampleRateValues[] = { 44100, 48000, 88200, 96000, 128000 };
 const char* sampleRateLabels[] = { "44.1k", "48k", "88.2k", "96k", "128k" };
-const long timeoutValues[] = { 0, 30000, 60000, 120000, 300000 };
-const char* timeoutLabels[] = { "Always On", "30 Sec", "1 Min", "2 Min", "5 Min" };
-const char* powerModeLabels[] = { "OFF", "BASIC (160)", "ULTRA (80)" };
+const long timeoutValues[] = { 15000, 30000, 60000, 120000, 300000, 900000 };
+const char* timeoutLabels[] = { "15 Sec", "30 Sec", "1 Min", "2 Min", "5 Min", "15 Min" };
+const int brightnessValues[] = { 10, 40, 80, 140, 255 };
+const char* brightnessLabels[] = { "10%", "25%", "50%", "75%", "100%" };
+const char* powerModeLabels[] = { "OFF", "Medium", "High" };
 const char* helpLines[] = {
-  "--- MUSIC PLAYER ---",
-  "Enter: Open Album  P: Pause",
-  "; / . : Scroll Albums/Songs",
+  "--- Player Controls ---",
+  "Enter: Open Album",
+  "P: Pause/Play",
+  "; / . : Scroll",
   "[ / ] : Volume - / +",
-  "N / B : Next / Prev Song",
-  "/ / , : Seek +Xs / -Xs",
-  "S: Search  F: Shuffle",
+  "B / N : Prev / Next",
+  ", / / : Rewind",
+  "S: Search",
+  "F: Shuffle",
+  "   SA - Shuffle album",
+  "   SR - Shuffle artist",
+  "   SG - Shuffle global",
   "L: Loop (1x/LP/1T)",
-  "E: Expand  Q: Collapse all",
-  "Esc / ` : Settings",
-  "V: Visualizer  T: Track Info",
-  "I: Close Help",
-  "--- SMART FEATURES ---",
+  "   1x - Play album once",
+  "   LP - Loop album",
+  "   1T - Loop one track",
+  "E: Expand all",
+  "Q: Collapse all",
+  "Esc: Settings",
+  "V: Visualizer / Info",
+  "T: Full track info",
+  "I / Esc: Close Help",
+  "Hold Esc on boot: Reset",
+  "all settings",
+  "",
+  "--- Extra Features ---",
+  #ifdef ENABLE_WIFI
   "Web UI: Enable Wi-Fi in",
   "settings to access.",
-  "Power Saver: Underclock",
+  #endif
+  "Power Saving: Underclock",
   "CPU to save battery life.",
   "",
-  "--- POCKET MODE ---",
-  "Btn A (1 Click): Play/Pause",
-  "Btn A (2 Clicks): Next",
-  "Btn A (3 Clicks): Prev",
-  "Press any key to wake screen",
-  "Hold Esc on boot: Reset",
-  "--- ABOUT ---",
-  "Fork of SaM player",
+  "--- Pocket Mode ---",
+  "Press G0 button:",
+  "1 Click: Play/Pause",
+  "2 Clicks: Next track",
+  "3 Clicks: Previous track",
+  "",
+  "--- About ---",
+  "Fork of SAM player",
   "made by Oleg Proshkin.",
-  "original author",
+  "Original author:",
   "Sanchit Minda.",
   "---",
-  "GH: github.com/sanchitminda",
-  "Share your suggestions!"
+  "GH: github.com/oleg.pro171",
+  "Share your suggestions!",
+  "",
+  "",
+  "",
 };
-const int numHelpLines = 32;
-const int numSettings = 16;
+const int numHelpLines = sizeof(helpLines) / sizeof(helpLines[0]);
+// Settings menu layout: cases 0-3 are common, then Wi-Fi cases (if enabled), then the rest
+// Settings menu layout
+// 0: Brightness, 1: Screen Time-Out, 2: Power Saving, 3: Theme,
+// 4: Boot Animation, 5: Rewind Speed, 6: Sample Rate
+// [Wi-Fi: 7: Wi-Fi Power, 8: Wi-Fi Mode, 9: Setup Network, 10: Setup AP]
+// Last: Update Library
+#ifdef ENABLE_WIFI
+const int numSettings = 12;
+#define IDX_WIFI_POWER 7
+#define IDX_WIFI_MODE 8
+#define IDX_WIFI_SETUP 9
+#define IDX_WIFI_AP 10
+#define IDX_UPDATE_LIB 11
+#else
+const int numSettings = 8;
+#define IDX_UPDATE_LIB 7
+#endif
 
 // ==========================================
 // GLOBALS
 // ==========================================
 struct Settings {
-    int brightness = 100;      
+    int brightnessIndex = 4;   // index into brightnessValues/Labels (default 100%)      
     int themeIndex = 0;
     int visMode = 0;
     int timeoutIndex = 0;      
-    bool resumePlay = true;    
     int spkRateIndex = 4;      
     int lastIndex = 0;         
     uint32_t lastPos = 0;      
@@ -150,11 +463,16 @@ struct Settings {
     int seek = 0;
     int volume = 128;
     bool showSplash = true;
+    int lastAlbumIdx = -1;      // album index for resume (-1 = no album context)
+    int lastAlbumTrack = 0;     // track index within album
+    int kbLayoutIndex = 0;      // keyboard layout: 0=EN, 1=RU
 };
 
 Settings userSettings;
 Preferences preferences;
+#ifdef ENABLE_WIFI
 WebServer server(80);
+#endif
 LGFX_Sprite visSprite(&M5Cardputer.Display);
 
 UIState currentState = UI_PLAYER;
@@ -162,13 +480,16 @@ unsigned long lastInputTime = 0;
 bool isScreenOff = false;
 
 // Text Input Globals
+#ifdef ENABLE_WIFI
 int textInputTarget = 0; // 0=STA Pass, 1=AP SSID, 2=AP Pass
 String enteredText = "";
+#endif
 
 
 // Search globals
 String g_searchQuery = "";
-std::vector<int> g_searchResults;  // indices into audioApp.songOffsets
+std::vector<int> g_searchResults;       // indices into audioApp.songOffsets
+std::vector<String> g_searchDisplay;    // cached "artist - title" for each result
 int g_searchCursor = 0;
 int g_searchScrollOffset = 0;
 
@@ -192,11 +513,92 @@ int g_sidebarScrollOffset = 0;
 std::vector<uint32_t> g_albumSongOffsets;   // byte offsets of song lines in current album
 int g_albumSongCursor = 0;
 int g_albumSongScrollOffset = 0;
+String g_trackNumInput = "";               // accumulated digit string for track jump
+unsigned long g_trackNumLastInput = 0;     // millis of last digit press
+#define TRACK_NUM_TIMEOUT 1500             // ms before digit input resets
+
+// Apply entered track number to cursor (1-indexed for user, 0-indexed internally)
+void applyTrackNumInput() {
+    if (g_trackNumInput.length() == 0 || g_albumSongOffsets.size() == 0) return;
+    int trackNum = g_trackNumInput.toInt();
+    if (trackNum < 1) trackNum = 1;
+    int idx = trackNum - 1; // convert to 0-indexed
+    if (idx >= (int)g_albumSongOffsets.size()) idx = (int)g_albumSongOffsets.size() - 1;
+    g_albumSongCursor = idx;
+    // Adjust scroll to keep cursor visible
+    if (g_albumSongCursor < g_albumSongScrollOffset) g_albumSongScrollOffset = g_albumSongCursor;
+    if (g_albumSongCursor >= g_albumSongScrollOffset + MAX_VISIBLE_ROWS)
+        g_albumSongScrollOffset = g_albumSongCursor - MAX_VISIBLE_ROWS + 1;
+}
 String g_currentAlbumName = "";
 String g_currentAlbumArtist = "";
+int g_currentAlbumIdx = -1;                 // album index currently loaded in g_albumSongOffsets
 bool g_albumPlaybackActive = false;         // true when playing within an album
 int g_albumPlaybackIndex = 0;               // index into g_albumSongOffsets for current track
 
+// Shuffle queue — shared by all shuffle modes (album/artist/global)
+// Contents depend on mode:
+//   SHUF_ALBUM: indices into g_albumSongOffsets (0..albumSize-1)
+//   SHUF_ARTIST/SHUF_GLOBAL: global songOffsets indices
+std::vector<int> g_shuffleQueue;
+int g_shufflePos = 0;
+
+// Fisher-Yates shuffle a vector in-place, placing startVal at position 0
+void fisherYatesShuffle(std::vector<int>& v, int startVal) {
+    int n = v.size();
+    for (int i = n - 1; i > 0; i--) {
+        int j = random(0, i + 1);
+        int tmp = v[i]; v[i] = v[j]; v[j] = tmp;
+    }
+    if (startVal >= 0) {
+        for (int i = 0; i < n; i++) {
+            if (v[i] == startVal) { int tmp = v[0]; v[0] = v[i]; v[i] = tmp; break; }
+        }
+    }
+}
+
+// Forward declaration for findSongInPlaylist (defined after AudioEngine)
+int findSongInPlaylist(const String& targetPath);
+
+// Build shuffle queue for the current mode.
+// globalSongCount: pass audioApp.songOffsets.size() for SHUF_GLOBAL
+void buildShuffleQueue(ShuffleMode mode, int currentVal, int globalSongCount = 0) {
+    g_shuffleQueue.clear();
+    g_shufflePos = 0;
+    if (mode == SHUF_ALBUM) {
+        for (int i = 0; i < (int)g_albumSongOffsets.size(); i++) g_shuffleQueue.push_back(i);
+    } else if (mode == SHUF_ARTIST) {
+        // Collect global song indices for the current artist by scanning search index once.
+        // Search index lines match songOffsets order: line N = song index N.
+        // Format: filepath\tartist\ttitle\talbum\tduration\taudioOffset
+        String targetArtist = "";
+        if (g_currentAlbumIdx >= 0 && g_currentAlbumIdx < (int)g_albumArtistMap.size()) {
+            int ai = g_albumArtistMap[g_currentAlbumIdx];
+            if (ai >= 0 && ai < (int)g_artistNames.size()) targetArtist = g_artistNames[ai];
+        }
+        if (targetArtist.length() > 0 && SD.exists(SEARCH_INDEX_FILE)) {
+            String targetLower = targetArtist; targetLower.toLowerCase();
+            File f = SD.open(SEARCH_INDEX_FILE);
+            if (f) {
+                int idx = 0;
+                while (f.available()) {
+                    String line = f.readStringUntil('\n'); line.trim();
+                    int t1 = line.indexOf('\t');
+                    int t2 = (t1 >= 0) ? line.indexOf('\t', t1 + 1) : -1;
+                    if (t1 >= 0 && t2 >= 0) {
+                        String artist = line.substring(t1 + 1, t2); artist.toLowerCase();
+                        if (artist == targetLower) g_shuffleQueue.push_back(idx);
+                    }
+                    idx++;
+                }
+                f.close();
+            }
+        }
+    } else if (mode == SHUF_GLOBAL) {
+        for (int i = 0; i < globalSongCount; i++) g_shuffleQueue.push_back(i);
+    }
+    fisherYatesShuffle(g_shuffleQueue, currentVal);
+}
 
 // ==========================================
 // HARDWARE CLASSES (FFT & SPEAKER)
@@ -268,9 +670,8 @@ class ConfigManager {
 public:
     static void load() {
         preferences.begin("sam_music", true);
-        userSettings.brightness = preferences.getInt("brightness", 100);
+        userSettings.brightnessIndex = preferences.getInt("brightIdx", 4);
         userSettings.timeoutIndex = preferences.getInt("timeoutIndex", 0);
-        userSettings.resumePlay = preferences.getBool("resumePlay", true);
         userSettings.spkRateIndex = preferences.getInt("spkRate", 4);
         userSettings.lastIndex = preferences.getInt("lastIndex", 0);
         userSettings.lastPos = preferences.getUInt("lastPos", 0);
@@ -286,11 +687,14 @@ public:
         userSettings.seek = preferences.getInt("seek", 5);
         userSettings.volume = preferences.getInt("volume", 128);
         userSettings.showSplash = preferences.getBool("showSplash", true);
+        userSettings.lastAlbumIdx = preferences.getInt("lastAlbIdx", -1);
+        userSettings.lastAlbumTrack = preferences.getInt("lastAlbTrk", 0);
+        userSettings.kbLayoutIndex = preferences.getInt("kbLayout", 0);
         preferences.end();
 
         // Validate all settings to prevent crashes from corrupted NVS
-        userSettings.brightness = constrain(userSettings.brightness, 5, 255);
-        userSettings.timeoutIndex = constrain(userSettings.timeoutIndex, 0, 4);
+        userSettings.brightnessIndex = constrain(userSettings.brightnessIndex, 0, 4);
+        userSettings.timeoutIndex = constrain(userSettings.timeoutIndex, 0, 5);
         userSettings.spkRateIndex = constrain(userSettings.spkRateIndex, 0, 4);
         userSettings.powerSaverMode = constrain(userSettings.powerSaverMode, 0, 2);
         userSettings.themeIndex = constrain(userSettings.themeIndex, 0, NUM_THEMES - 1);
@@ -298,6 +702,7 @@ public:
         userSettings.seek = constrain(userSettings.seek, 5, 60);
         userSettings.volume = constrain(userSettings.volume, 0, 255);
         if (userSettings.lastIndex < 0) userSettings.lastIndex = 0;
+        userSettings.kbLayoutIndex = constrain(userSettings.kbLayoutIndex, 0, NUM_LAYOUTS - 1);
         if(userSettings.apSSID.length() == 0) userSettings.apSSID = "Cardputer";
         if(userSettings.apPass.length() < 8) userSettings.apPass = "12345678";
     }
@@ -305,9 +710,8 @@ public:
     static void save(uint32_t currentPos = 0, int currentIndex = -1) {
         if(currentIndex >= 0) { userSettings.lastPos = currentPos; userSettings.lastIndex = currentIndex; }
         preferences.begin("sam_music", false);
-        preferences.putInt("brightness", userSettings.brightness);
+        preferences.putInt("brightIdx", userSettings.brightnessIndex);
         preferences.putInt("timeoutIndex", userSettings.timeoutIndex);
-        preferences.putBool("resumePlay", userSettings.resumePlay);
         preferences.putInt("spkRate", userSettings.spkRateIndex);
         preferences.putInt("lastIndex", userSettings.lastIndex);
         preferences.putUInt("lastPos", userSettings.lastPos);
@@ -323,63 +727,42 @@ public:
         preferences.putInt("seek", userSettings.seek);
         preferences.putInt("volume", userSettings.volume);
         preferences.putBool("showSplash", userSettings.showSplash);
+        preferences.putInt("lastAlbIdx", userSettings.lastAlbumIdx);
+        preferences.putInt("lastAlbTrk", userSettings.lastAlbumTrack);
+        preferences.putInt("kbLayout", userSettings.kbLayoutIndex);
         preferences.end();
     }
 
-    static void exportToSD() {
-        if (SD.exists(CONFIG_FILE)) SD.remove(CONFIG_FILE);
-        File file = SD.open(CONFIG_FILE, FILE_WRITE);
-        if (file) {
-            file.println(userSettings.brightness); file.println(userSettings.timeoutIndex);
-            file.println(userSettings.resumePlay ? 1 : 0); file.println(userSettings.spkRateIndex);
-            file.println(userSettings.lastIndex); file.println(userSettings.lastPos);
-            file.println(userSettings.wifiEnabled ? 1 : 0); file.println(userSettings.wifiSSID);
-            file.println(userSettings.wifiPass); file.println(userSettings.isAPMode ? 1 : 0);
-            file.println(userSettings.apSSID); file.println(userSettings.apPass);
-            file.println(userSettings.powerSaverMode); file.println(userSettings.seek);
-            file.println(userSettings.volume);
-            file.println(userSettings.showSplash ? 1 : 0); file.close();
-            
-            M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
-            M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("Exported to SD!"); delay(1000);
-        }
-    }
-
-    static void importFromSD() {
-        if (!SD.exists(CONFIG_FILE)) {
-            M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
-            M5Cardputer.Display.setTextColor(TFT_RED); M5Cardputer.Display.print("No config.txt found!"); delay(1000); return;
-        }
-        File file = SD.open(CONFIG_FILE);
-        if (file) {
-            if(file.available()) userSettings.brightness = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.timeoutIndex = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.resumePlay = (file.readStringUntil('\n').toInt() == 1);
-            if(file.available()) userSettings.spkRateIndex = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.lastIndex = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.lastPos = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.wifiEnabled = (file.readStringUntil('\n').toInt() == 1);
-            if(file.available()) { userSettings.wifiSSID = file.readStringUntil('\n'); userSettings.wifiSSID.trim(); }
-            if(file.available()) { userSettings.wifiPass = file.readStringUntil('\n'); userSettings.wifiPass.trim(); }
-            if(file.available()) userSettings.isAPMode = (file.readStringUntil('\n').toInt() == 1);
-            if(file.available()) { userSettings.apSSID = file.readStringUntil('\n'); userSettings.apSSID.trim(); }
-            if(file.available()) { userSettings.apPass = file.readStringUntil('\n'); userSettings.apPass.trim(); }
-            if(file.available()) userSettings.powerSaverMode = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.seek = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.volume = file.readStringUntil('\n').toInt();
-            if(file.available()) userSettings.showSplash = (file.readStringUntil('\n').toInt() == 1);
-            file.close();
-            save(); M5Cardputer.Display.setBrightness(userSettings.brightness);
-            M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.setCursor(10, 40);
-            M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("Imported from SD!"); delay(1000);
-        }
-    }
 };
 
+// Get the target CPU frequency based on power mode setting
+int getTargetCpuMhz() {
+    if (
+#ifdef ENABLE_WIFI
+        userSettings.wifiEnabled ||
+#endif
+        userSettings.powerSaverMode == 0) return 240;
+    else if (userSettings.powerSaverMode == 1) return 160;
+    else return 80;
+}
+
 void applyCpuFrequency() {
-    if (userSettings.wifiEnabled || userSettings.powerSaverMode == 0) setCpuFrequencyMhz(240); 
-    else if (userSettings.powerSaverMode == 1) setCpuFrequencyMhz(160); 
-    else setCpuFrequencyMhz(80); 
+    setCpuFrequencyMhz(getTargetCpuMhz());
+}
+
+// Drop CPU to minimum when idle (paused + screen off). Restore on activity.
+void applyCpuForState(bool isPlaying, bool screenOff) {
+    if (!isPlaying && screenOff) {
+        // Nothing happening — minimum power
+        setCpuFrequencyMhz(80);
+    } else if (!isPlaying) {
+        // Paused but screen on — need enough for UI, drop below normal
+        int target = getTargetCpuMhz();
+        setCpuFrequencyMhz(min(target, 160));
+    } else {
+        // Playing — full target speed for audio decoding
+        applyCpuFrequency();
+    }
 }
 
 // ==========================================
@@ -447,6 +830,7 @@ void loadAlbumSongs(int albumIdx) {
     g_albumSongOffsets.clear();
     g_albumSongCursor = 0;
     g_albumSongScrollOffset = 0;
+    g_currentAlbumIdx = albumIdx;
     if (albumIdx < 0 || (size_t)albumIdx >= g_albumOffsets.size()) return;
     File f = SD.open(ALBUM_INDEX_FILE);
     if (!f) return;
@@ -474,10 +858,12 @@ String getAlbumSongPath(int songIdx) {
     f.seek(g_albumSongOffsets[songIdx]);
     String line = f.readStringUntil('\n'); line.trim();
     f.close();
-    // Format: TT|/path/to/file.mp3
+    // Format: TT|/path/to/file.mp3|title
     int pipePos = line.indexOf('|');
     if (pipePos < 0) return "";
-    String path = line.substring(pipePos + 1);
+    String rest = line.substring(pipePos + 1);
+    int pipe2 = rest.indexOf('|');
+    String path = (pipe2 >= 0) ? rest.substring(0, pipe2) : rest;
     path.trim();
     if (path.length() > 0 && !path.startsWith("/")) path = "/" + path;
     return path;
@@ -787,7 +1173,7 @@ public:
     int currentIndex = 0;
     int browserIndex = 0;
     bool isPaused = false;
-    bool isShuffle = false;
+    ShuffleMode shuffleMode = SHUF_OFF;
     LoopState loopMode = NO_LOOP;
     uint32_t paused_at = 0;
     uint32_t pausedSize = 0;
@@ -818,11 +1204,14 @@ public:
                         if (rawAlbumFile) {
                             String albumName = tag.album.length() > 0 ? tag.album : "[No Album]";
                             String artistName = tag.artist.length() > 0 ? tag.artist : "[Unknown]";
-                            albumName.replace("\t", " "); artistName.replace("\t", " ");
+                            String titleName = tag.title.length() > 0 ? tag.title : "";
+                            albumName.replace("\t", " "); artistName.replace("\t", " "); titleName.replace("\t", " ");
+                            // Raw format: AlbumName\tTrackNo\tFilePath\tArtist\tTitle
                             rawAlbumFile->print(albumName); rawAlbumFile->print("\t");
                             rawAlbumFile->print(tag.trackNo); rawAlbumFile->print("\t");
                             rawAlbumFile->print(filepath); rawAlbumFile->print("\t");
-                            rawAlbumFile->println(artistName);
+                            rawAlbumFile->print(artistName); rawAlbumFile->print("\t");
+                            rawAlbumFile->println(titleName);
                         }
                         if (searchIdxFile) {
                             // Format: filepath\tartist\ttitle\talbum\tduration\taudioOffset
@@ -851,12 +1240,12 @@ public:
         if (!SD.exists(ALBUM_RAW_FILE)) return;
 
         // Pass 1: collect unique albums with their most common artist
-        // Raw format: AlbumName\tTrackNo\tFilePath\tArtist
+        // Raw format: AlbumName\tTrackNo\tFilePath\tArtist\tTitle
         struct AlbumInfo { String name; String artist; };
         std::vector<AlbumInfo> albums;
         File raw = SD.open(ALBUM_RAW_FILE);
         if (!raw) return;
-        struct RawEntry { String album; String artist; uint8_t trackNo; String path; };
+        struct RawEntry { String album; String artist; uint8_t trackNo; String path; String title; };
         std::vector<RawEntry> rawEntries;
         while (raw.available()) {
             String line = raw.readStringUntil('\n'); line.trim();
@@ -865,12 +1254,14 @@ public:
             int tab2 = line.indexOf('\t', tab1 + 1);
             if (tab2 < 0) continue;
             int tab3 = line.indexOf('\t', tab2 + 1);
+            int tab4 = (tab3 >= 0) ? line.indexOf('\t', tab3 + 1) : -1;
             String albumName = line.substring(0, tab1);
             uint8_t trackNo = (uint8_t)line.substring(tab1 + 1, tab2).toInt();
             String filePath = (tab3 >= 0) ? line.substring(tab2 + 1, tab3) : line.substring(tab2 + 1);
-            String artistName = (tab3 >= 0) ? line.substring(tab3 + 1) : "[Unknown]";
-            artistName.trim(); filePath.trim();
-            rawEntries.push_back({albumName, artistName, trackNo, filePath});
+            String artistName = (tab3 >= 0 && tab4 >= 0) ? line.substring(tab3 + 1, tab4) : ((tab3 >= 0) ? line.substring(tab3 + 1) : "[Unknown]");
+            String titleName = (tab4 >= 0) ? line.substring(tab4 + 1) : "";
+            artistName.trim(); filePath.trim(); titleName.trim();
+            rawEntries.push_back({albumName, artistName, trackNo, filePath, titleName});
         }
         raw.close();
 
@@ -929,11 +1320,11 @@ public:
             }
 
             // Collect songs for this album from in-memory raw entries
-            struct SongEntry { uint8_t trackNo; String path; };
+            struct SongEntry { uint8_t trackNo; String path; String title; };
             std::vector<SongEntry> songs;
             for (size_t ri = 0; ri < rawEntries.size(); ri++) {
                 if (rawEntries[ri].album == albums[ai].name) {
-                    songs.push_back({rawEntries[ri].trackNo, rawEntries[ri].path});
+                    songs.push_back({rawEntries[ri].trackNo, rawEntries[ri].path, rawEntries[ri].title});
                 }
             }
 
@@ -950,7 +1341,7 @@ public:
             idx.print("@"); idx.println(albums[ai].name);
             for (size_t si = 0; si < songs.size(); si++) {
                 char trackStr[4]; sprintf(trackStr, "%02d", songs[si].trackNo);
-                idx.print(trackStr); idx.print("|"); idx.println(songs[si].path);
+                idx.print(trackStr); idx.print("|"); idx.print(songs[si].path); idx.print("|"); idx.println(songs[si].title);
             }
         }
         idx.close();
@@ -1009,6 +1400,7 @@ public:
     static void MDCallback(void *cbData, const char *type, bool isUnicode, const char *string);
 
     bool play(int index, uint32_t startPos = 0) {
+        applyCpuFrequency(); // ensure full speed for decoding
         stop(); if (songOffsets.empty()) return false;
         currentIndex = index; browserIndex = index; currentTitle = ""; currentArtist = ""; currentAlbum = "";
         String fname = getSongPath(currentIndex);
@@ -1040,7 +1432,10 @@ public:
         if (decoder->isRunning()) {
             paused_at = id3->getPos(); pausedSize = id3->getSize();
             decoder->stop(); isPaused = true;
+            M5Cardputer.Speaker.stop(); // stop DMA to save power
+            applyCpuForState(false, isScreenOff);
         } else if (isPaused) {
+            applyCpuFrequency(); // restore CPU before decoding
             String savedTitle = currentTitle, savedArtist = currentArtist, savedAlbum = currentAlbum;
             uint16_t savedDur = currentDuration;
             uint32_t savedOffset = currentAudioOffset;
@@ -1072,17 +1467,41 @@ public:
         if (songOffsets.empty()) return;
         if (autoPlay && loopMode == LOOP_ONE) { play(currentIndex); return; }
 
-        // Album-scoped playback
+        // Artist/Global shuffle: use shared queue with global indices
+        if (shuffleMode == SHUF_ARTIST || shuffleMode == SHUF_GLOBAL) {
+            if (g_shuffleQueue.empty()) buildShuffleQueue(shuffleMode, currentIndex, songOffsets.size());
+            g_shufflePos++;
+            if (g_shufflePos >= (int)g_shuffleQueue.size()) {
+                if (loopMode == LOOP_ALL) { buildShuffleQueue(shuffleMode, -1, songOffsets.size()); g_shufflePos = 0; }
+                else { stop(); return; }
+            }
+            play(g_shuffleQueue[g_shufflePos]);
+            return;
+        }
+
+        // Album-scoped playback (sequential or album shuffle)
         if (g_albumPlaybackActive && g_albumSongOffsets.size() > 0) {
-            if (isShuffle) {
-                g_albumPlaybackIndex = random(0, g_albumSongOffsets.size());
+            if (shuffleMode == SHUF_ALBUM) {
+                if (g_shuffleQueue.empty()) buildShuffleQueue(SHUF_ALBUM, g_albumPlaybackIndex);
+                g_shufflePos++;
+                if (g_shufflePos >= (int)g_shuffleQueue.size()) {
+                    if (loopMode == LOOP_ALL) { buildShuffleQueue(SHUF_ALBUM, -1); g_shufflePos = 0; }
+                    else {
+                        g_albumPlaybackIndex = 0; userSettings.lastAlbumTrack = 0;
+                        String firstPath = getAlbumSongPath(0);
+                        int globalIdx = findSongInPlaylist(firstPath);
+                        if (globalIdx >= 0) { play(globalIdx); togglePause(); }
+                        else { stop(); g_albumPlaybackActive = false; }
+                        return;
+                    }
+                }
+                g_albumPlaybackIndex = g_shuffleQueue[g_shufflePos];
             } else {
                 g_albumPlaybackIndex++;
                 if (g_albumPlaybackIndex >= (int)g_albumSongOffsets.size()) {
                     if (loopMode == LOOP_ALL) g_albumPlaybackIndex = 0;
                     else {
-                        // Album finished: go to first track and pause
-                        g_albumPlaybackIndex = 0;
+                        g_albumPlaybackIndex = 0; userSettings.lastAlbumTrack = 0;
                         String firstPath = getAlbumSongPath(0);
                         int globalIdx = findSongInPlaylist(firstPath);
                         if (globalIdx >= 0) { play(globalIdx); togglePause(); }
@@ -1091,39 +1510,53 @@ public:
                     }
                 }
             }
+            userSettings.lastAlbumTrack = g_albumPlaybackIndex;
             String songPath = getAlbumSongPath(g_albumPlaybackIndex);
             int globalIdx = findSongInPlaylist(songPath);
             if (globalIdx >= 0) play(globalIdx); else { g_albumPlaybackActive = false; }
             return;
         }
 
-        if (isShuffle) currentIndex = random(0, songOffsets.size());
-        else {
-            currentIndex++;
-            if ((size_t)currentIndex >= songOffsets.size()) { if (loopMode == LOOP_ALL) currentIndex = 0; else { stop(); currentIndex = 0; return; } }
-        }
+        // Global sequential (no album context, no shuffle)
+        currentIndex++;
+        if ((size_t)currentIndex >= songOffsets.size()) { if (loopMode == LOOP_ALL) currentIndex = 0; else { stop(); currentIndex = 0; return; } }
         play(currentIndex);
     }
 
     void prev() {
         if (songOffsets.empty()) return;
 
+        // Artist/Global shuffle: go back in shared queue
+        if (shuffleMode == SHUF_ARTIST || shuffleMode == SHUF_GLOBAL) {
+            if (g_shuffleQueue.size() > 0) {
+                if (g_shufflePos > 0) g_shufflePos--;
+                else g_shufflePos = g_shuffleQueue.size() - 1; // wrap to end
+                play(g_shuffleQueue[g_shufflePos]);
+            }
+            return;
+        }
+
         // Album-scoped playback
         if (g_albumPlaybackActive && g_albumSongOffsets.size() > 0) {
-            if (isShuffle) {
-                g_albumPlaybackIndex = random(0, g_albumSongOffsets.size());
+            if (shuffleMode == SHUF_ALBUM) {
+                if (g_shuffleQueue.size() > 0) {
+                    if (g_shufflePos > 0) g_shufflePos--;
+                    else g_shufflePos = g_shuffleQueue.size() - 1; // wrap to end
+                    g_albumPlaybackIndex = g_shuffleQueue[g_shufflePos];
+                }
             } else {
                 g_albumPlaybackIndex--;
                 if (g_albumPlaybackIndex < 0) g_albumPlaybackIndex = (int)g_albumSongOffsets.size() - 1;
             }
+            userSettings.lastAlbumTrack = g_albumPlaybackIndex;
             String songPath = getAlbumSongPath(g_albumPlaybackIndex);
             int globalIdx = findSongInPlaylist(songPath);
             if (globalIdx >= 0) play(globalIdx); else { g_albumPlaybackActive = false; }
             return;
         }
 
-        if (isShuffle) currentIndex = random(0, songOffsets.size());
-        else { currentIndex--; if (currentIndex < 0) currentIndex = songOffsets.size() - 1; }
+        // Global sequential
+        currentIndex--; if (currentIndex < 0) currentIndex = songOffsets.size() - 1;
         play(currentIndex);
     }
 
@@ -1144,7 +1577,7 @@ public:
 
     void loopTasks() {
         if (decoder && decoder->isRunning()) {
-            if (!decoder->loop()) { decoder->stop(); next(true); if(userSettings.resumePlay) ConfigManager::save(id3 ? id3->getPos() : 0, currentIndex); }
+            if (!decoder->loop()) { decoder->stop(); next(true); ConfigManager::save(id3 ? id3->getPos() : 0, currentIndex); }
         }
     }
 
@@ -1220,9 +1653,11 @@ public:
     static int settingsCursor;
     static int menuScrollOffset;
     static bool showVisualizer;
+#ifdef ENABLE_WIFI
     static int wifiCursor;
     static int wifiScrollOffset;
     static int wifiNetworkCount;
+#endif
     static int helpScrollOffset;
 
 
@@ -1247,10 +1682,11 @@ public:
 
     static void rebuildSearchResults() {
         g_searchResults.clear();
+        g_searchDisplay.clear();
         g_searchCursor = 0;
         g_searchScrollOffset = 0;
         if (g_searchQuery.length() == 0) return;
-        String queryLower = g_searchQuery; queryLower.toLowerCase();
+        String queryLower = utf8ToLower(g_searchQuery);
 
         // Use search index (filepath + artist + title + album) if available
         bool useIndex = SD.exists(SEARCH_INDEX_FILE);
@@ -1259,11 +1695,31 @@ public:
         int idx = 0;
         while (f.available()) {
             String line = f.readStringUntil('\n'); line.trim();
-            String lineLower = line; lineLower.toLowerCase();
-            // Replace tabs with spaces so all fields are searchable as one string
+            String lineLower = utf8ToLower(line);
             lineLower.replace("\t", " ");
             if (matchAllTokens(lineLower, queryLower)) {
                 g_searchResults.push_back(idx);
+                // Cache display string: "artist - title" from the same line we just read
+                String dispName = "";
+                if (useIndex) {
+                    int t1 = line.indexOf('\t');
+                    int t2 = (t1 >= 0) ? line.indexOf('\t', t1+1) : -1;
+                    int t3 = (t2 >= 0) ? line.indexOf('\t', t2+1) : -1;
+                    String artist = (t1 >= 0 && t2 >= 0) ? line.substring(t1+1, t2) : "";
+                    String title = (t2 >= 0 && t3 >= 0) ? line.substring(t2+1, t3) : "";
+                    artist.trim(); title.trim();
+                    if (artist.length() > 0 && title.length() > 0) dispName = artist + " - " + title;
+                    else if (title.length() > 0) dispName = title;
+                    else if (artist.length() > 0) dispName = artist;
+                }
+                if (dispName.length() == 0) {
+                    // Fallback: extract filename from path (first field)
+                    int t1 = line.indexOf('\t');
+                    String path = (t1 >= 0) ? line.substring(0, t1) : line;
+                    int slash = path.lastIndexOf('/');
+                    dispName = (slash >= 0) ? path.substring(slash + 1) : path;
+                }
+                g_searchDisplay.push_back(dispName);
             }
             idx++;
         }
@@ -1274,17 +1730,22 @@ public:
         M5Cardputer.Display.fillScreen(C_BG_DARK);
         // Header
         M5Cardputer.Display.fillRect(0, 0, M5Cardputer.Display.width(), HEADER_HEIGHT, C_HEADER);
-        M5Cardputer.Display.setFont(&fonts::Font0);
+        M5Cardputer.Display.setFont(TAG_FONT);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN, C_HEADER);
         M5Cardputer.Display.setCursor(5, 5);
         M5Cardputer.Display.print("Search Songs");
+        // Layout indicator on right side of header
+        String layoutLabel = g_layoutNames[userSettings.kbLayoutIndex];
+        M5Cardputer.Display.setTextColor(C_ACCENT, C_HEADER);
+        M5Cardputer.Display.setCursor(M5Cardputer.Display.width() - 22, 5);
+        M5Cardputer.Display.print(layoutLabel);
 
         // Search input box
         int boxY = HEADER_HEIGHT + 4;
         M5Cardputer.Display.fillRect(2, boxY, M5Cardputer.Display.width() - 4, 16, C_BG_LIGHT);
         M5Cardputer.Display.drawRect(2, boxY, M5Cardputer.Display.width() - 4, 16, C_ACCENT);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
-        M5Cardputer.Display.setCursor(6, boxY + 4);
+        M5Cardputer.Display.setCursor(6, boxY + 2);
         String displayQuery = g_searchQuery.length() > 0 ? g_searchQuery : "";
         M5Cardputer.Display.print(displayQuery + "_");
 
@@ -1301,7 +1762,9 @@ public:
             M5Cardputer.Display.setCursor(6, yPos);
             M5Cardputer.Display.print("No results.");
         } else {
-            for (int i = 0; i < MAX_VISIBLE_ROWS; i++) {
+            // Display from cached g_searchDisplay — no SD I/O
+            int maxRows = SEARCH_VISIBLE_ROWS;
+            for (int i = 0; i < maxRows; i++) {
                 int ri = g_searchScrollOffset + i;
                 if (ri >= totalResults) break;
                 int songIdx = g_searchResults[ri];
@@ -1310,22 +1773,16 @@ public:
 
                 if (isSelected) {
                     M5Cardputer.Display.fillRect(2, yPos - 1, M5Cardputer.Display.width() - 4, ROW_HEIGHT, C_ACCENT);
-                    M5Cardputer.Display.setTextColor(C_BG_DARK);
-                } else if (isPlaying) {
-                    M5Cardputer.Display.setTextColor(C_PLAYING);
+                    M5Cardputer.Display.setTextColor(TFT_BLACK);
                 } else {
                     M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
                 }
 
-                // Get filename from playlist
-                String songPath = audioApp.getSongPath(songIdx);
-                int slash = songPath.lastIndexOf('/');
-                String fname = (slash >= 0) ? songPath.substring(slash + 1) : songPath;
-                if (fname.length() > 28) fname = fname.substring(0, 27) + "~";
-
-                M5Cardputer.Display.setCursor(6, yPos + 2);
-                if (isPlaying && !isSelected) M5Cardputer.Display.print("> ");
-                M5Cardputer.Display.print(fname);
+                M5Cardputer.Display.setCursor(6, yPos);
+                // Originally i made "> " prefix disappear when track is selected, but i think we should keep the prefix.
+                if (isPlaying /*&& !isSelected*/) M5Cardputer.Display.print("> ");
+                String disp = (ri < (int)g_searchDisplay.size()) ? truncateToFit(g_searchDisplay[ri], 228) : "";
+                M5Cardputer.Display.print(disp);
                 yPos += ROW_HEIGHT;
             }
 
@@ -1333,8 +1790,8 @@ public:
             M5Cardputer.Display.setTextColor(C_ACCENT);
             if (g_searchScrollOffset > 0)
                 M5Cardputer.Display.drawString("^", M5Cardputer.Display.width() - 10, boxY + 22);
-            if (g_searchScrollOffset + MAX_VISIBLE_ROWS < totalResults)
-                M5Cardputer.Display.drawString("v", M5Cardputer.Display.width() - 10, boxY + 20 + (MAX_VISIBLE_ROWS * ROW_HEIGHT) - 6);
+            if (g_searchScrollOffset + maxRows < totalResults)
+                M5Cardputer.Display.drawString("v", M5Cardputer.Display.width() - 10, boxY + 20 + (maxRows * ROW_HEIGHT) - 6);
         }
 
         // Footer
@@ -1378,7 +1835,7 @@ public:
         int y = py + 25;
         int lh = 11;
         int maxW = 194; // popup content width in pixels
-        M5Cardputer.Display.setFont(&fonts::Font0);
+        M5Cardputer.Display.setFont(TAG_FONT);
 
         String title = audioApp.currentTitle.length() > 0 ? audioApp.currentTitle : "(unknown)";
         String artist = audioApp.currentArtist.length() > 0 ? audioApp.currentArtist : "(unknown)";
@@ -1390,13 +1847,13 @@ public:
     }
 
     static void drawHelp() {
-        drawPopup("CONTROLS & HELP", "Press 'I' to Exit");
+        drawPopup("Controls & Info", "'I' or 'Esc' to Exit");
         int px = 15, py = 15;
         int contentY = py + 25;
-        int lineHeight = 12;
-        int visibleLines = 7;
+        int lineHeight = 16;
+        int visibleLines = 5;
 
-        M5Cardputer.Display.setFont(&fonts::Font0);
+        M5Cardputer.Display.setFont(TAG_FONT);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
 
         for (int i = 0; i < visibleLines; i++) {
@@ -1413,21 +1870,36 @@ public:
 
     static void drawPopup(const char* title, const char* footer) {
         int px = 15, py = 15, pw = 210, ph = 120;
-        M5Cardputer.Display.fillRoundRect(px, py, pw, ph, 4, C_BG_LIGHT); M5Cardputer.Display.drawRoundRect(px, py, pw, ph, 4, C_ACCENT);
-        M5Cardputer.Display.fillRoundRect(px+2, py+2, pw-4, 18, 2, C_HEADER); M5Cardputer.Display.setFont(&fonts::Font0);
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(px + 8, py + 5); M5Cardputer.Display.print(title);
-        if (footer) { M5Cardputer.Display.setCursor(px + 10, py + ph - 15); M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.print(footer); }
+
+        M5Cardputer.Display.fillRoundRect(px, py, pw, ph, 4, C_BG_LIGHT);
+        M5Cardputer.Display.drawRoundRect(px, py, pw, ph, 4, C_ACCENT);
+        M5Cardputer.Display.fillRoundRect(px+2, py+2, pw-4, 18, 2, C_HEADER);
+
+        M5Cardputer.Display.setFont(TAG_FONT);
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); 
+        M5Cardputer.Display.setCursor(px + 8, py + 5);
+        M5Cardputer.Display.print(title);
+
+        if (footer) 
+        { 
+            M5Cardputer.Display.setCursor(px + 10, py + ph - 15); 
+            M5Cardputer.Display.setTextColor(C_TEXT_DIM); 
+            M5Cardputer.Display.print(footer); 
+        }
     }
 
     static void drawHeader() {
         M5Cardputer.Display.fillRect(0, 0, M5Cardputer.Display.width(), HEADER_HEIGHT, C_HEADER);
         M5Cardputer.Display.setFont(&fonts::Font0); 
         String prefix = "Music Player";
+#ifdef ENABLE_WIFI
         if (userSettings.wifiEnabled) {
-            if (userSettings.isAPMode) { prefix = WiFi.softAPIP().toString(); M5Cardputer.Display.setTextColor(TFT_ORANGE, C_HEADER); } 
-            else if (WiFi.status() == WL_CONNECTED) { prefix = WiFi.localIP().toString(); M5Cardputer.Display.setTextColor(C_ACCENT, C_HEADER); } 
+            if (userSettings.isAPMode) { prefix = WiFi.softAPIP().toString(); M5Cardputer.Display.setTextColor(TFT_ORANGE, C_HEADER); }
+            else if (WiFi.status() == WL_CONNECTED) { prefix = WiFi.localIP().toString(); M5Cardputer.Display.setTextColor(C_ACCENT, C_HEADER); }
             else M5Cardputer.Display.setTextColor(C_TEXT_MAIN, C_HEADER);
-        } else M5Cardputer.Display.setTextColor(C_TEXT_MAIN, C_HEADER);
+        } else
+#endif
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN, C_HEADER);
         
         String headerText = prefix + " [" + String(g_albumOffsets.size()) + " albums]";
         M5Cardputer.Display.drawString(headerText.c_str(), 5, 5); 
@@ -1471,7 +1943,7 @@ public:
     }
 
     static void drawPlaylist() {
-        M5Cardputer.Display.setFont(&fonts::Font0);
+        M5Cardputer.Display.setFont(TAG_FONT);
         int totalRows = g_sidebarRows.size();
         int yPos = HEADER_HEIGHT + 2, xPos = 0;
 
@@ -1502,10 +1974,16 @@ public:
                 } else {
                     M5Cardputer.Display.setTextColor(C_HIGHLIGHT);
                 }
-                String prefix = expanded ? "- " : "+ ";
-                String dispName = prefix + name;
-                if (dispName.length() > 16) dispName = dispName.substring(0, 15) + "~";
-                M5Cardputer.Display.setCursor(xPos + 3, yPos + 3);
+
+                String artist = (row.dataIdx >= 0 && row.dataIdx < (int)g_artistNames.size()) ? g_artistNames[row.dataIdx] : "";
+                bool isCurrentArtist = (audioApp.currentArtist.length() > 0 && artist == audioApp.currentArtist);
+                String prefix;
+                if (isCurrentArtist) 
+                    prefix = "> ";
+                else
+                    prefix = expanded ? "- " : "+ ";
+                String dispName = truncateToFit(prefix + name, 114);
+                M5Cardputer.Display.setCursor(xPos + 3, yPos + 1);
                 M5Cardputer.Display.print(dispName);
             } else {
                 // Album row (indented)
@@ -1519,10 +1997,9 @@ public:
                 } else {
                     M5Cardputer.Display.setTextColor(C_TEXT_DIM);
                 }
-                String dispName = "  " + name;
-                if (dispName.length() > 16) dispName = dispName.substring(0, 15) + "~";
-                M5Cardputer.Display.setCursor(xPos + 5, yPos + 3);
-                if (isCurrentAlbum && !isSelected) M5Cardputer.Display.print(">");
+                String prefix = (isCurrentAlbum && !isSelected) ? "> " : "  ";
+                String dispName = truncateToFit(prefix + name, 108);
+                M5Cardputer.Display.setCursor(xPos + 5, yPos + 1);
                 M5Cardputer.Display.print(dispName);
             }
             yPos += ROW_HEIGHT;
@@ -1531,26 +2008,31 @@ public:
 
     static void drawAlbumSongsHeader() {
         M5Cardputer.Display.fillRect(0, 0, M5Cardputer.Display.width(), HEADER_HEIGHT, C_HEADER);
-        M5Cardputer.Display.setFont(&fonts::Font0);
+        M5Cardputer.Display.setFont(TAG_FONT);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN, C_HEADER);
         M5Cardputer.Display.setCursor(5, 5);
         String hdr = g_currentAlbumName;
-        if (hdr.length() > 30) hdr = hdr.substring(0, 29) + "~";
+        hdr = truncateToFit(hdr, 228);
         M5Cardputer.Display.print(hdr);
     }
 
     static void drawAlbumSongsFooter() {
         int footerY = M5Cardputer.Display.height() - BOTTOM_BAR_HEIGHT;
         M5Cardputer.Display.fillRect(0, footerY, M5Cardputer.Display.width(), BOTTOM_BAR_HEIGHT, C_HEADER);
-        M5Cardputer.Display.setTextColor(C_TEXT_DIM, C_HEADER);
         M5Cardputer.Display.setCursor(5, footerY + 4);
-        M5Cardputer.Display.print("Enter:Play  ;/.:Scroll  `:Back");
+        if (g_trackNumInput.length() > 0) {
+            M5Cardputer.Display.setTextColor(C_ACCENT, C_HEADER);
+            M5Cardputer.Display.print("Track: "); M5Cardputer.Display.print(g_trackNumInput); M5Cardputer.Display.print("_");
+        } else {
+            M5Cardputer.Display.setTextColor(C_TEXT_DIM, C_HEADER);
+            M5Cardputer.Display.print("Enter:Play ;/.:Scroll 0-9:Jump");
+        }
     }
 
     // Redraws only the song list rows — not the header or footer.
     // This is the function called on scroll actions.
     static void drawAlbumSongsList() {
-        M5Cardputer.Display.setFont(&fonts::Font0);
+        M5Cardputer.Display.setFont(TAG_FONT);
         int totalSongs = g_albumSongOffsets.size();
 
         // Content area bounds (between header and footer)
@@ -1571,25 +2053,43 @@ public:
                 if (idxFile) {
                     idxFile.seek(g_albumSongOffsets[ri]);
                     String line = idxFile.readStringUntil('\n'); line.trim();
+                    // Format: TT|filepath|title
                     int pipePos = line.indexOf('|');
                     if (pipePos >= 0) {
                         String trackStr = line.substring(0, pipePos);
-                        rows[rowCount].songPath = line.substring(pipePos + 1); rows[rowCount].songPath.trim();
+                        String rest = line.substring(pipePos + 1);
+                        int pipe2 = rest.indexOf('|');
+                        if (pipe2 >= 0) {
+                            rows[rowCount].songPath = rest.substring(0, pipe2); rows[rowCount].songPath.trim();
+                            String title = rest.substring(pipe2 + 1); title.trim();
+                            // Use title tag if available, fall back to filename
+                            String displayText;
+                            if (title.length() > 0) {
+                                displayText = title;
+                            } else {
+                                String sp = rows[rowCount].songPath;
+                                int slash = sp.lastIndexOf('/');
+                                displayText = (slash >= 0) ? sp.substring(slash + 1) : sp;
+                                int dotPos = displayText.lastIndexOf('.');
+                                if (dotPos > 0) displayText = displayText.substring(0, dotPos);
+                                if (g_currentAlbumArtist.length() > 0) {
+                                    String prefix = g_currentAlbumArtist + " - ";
+                                    if (displayText.startsWith(prefix)) displayText = displayText.substring(prefix.length());
+                                }
+                            }
+                            rows[rowCount].displayName = truncateToFit(trackStr + " " + displayText, 228);
+                        } else {
+                            // Old format fallback: TT|filepath (no title)
+                            rows[rowCount].songPath = rest; rows[rowCount].songPath.trim();
+                            String sp = rows[rowCount].songPath;
+                            int slash = sp.lastIndexOf('/');
+                            String fname = (slash >= 0) ? sp.substring(slash + 1) : sp;
+                            int dotPos = fname.lastIndexOf('.');
+                            if (dotPos > 0) fname = fname.substring(0, dotPos);
+                            rows[rowCount].displayName = truncateToFit(trackStr + " " + fname, 228);
+                        }
                         if (rows[rowCount].songPath.length() > 0 && !rows[rowCount].songPath.startsWith("/"))
                             rows[rowCount].songPath = "/" + rows[rowCount].songPath;
-                        String sp = rows[rowCount].songPath;
-                        int slash = sp.lastIndexOf('/');
-                        String fname = (slash >= 0) ? sp.substring(slash + 1) : sp;
-                        int dotPos = fname.lastIndexOf('.');
-                        if (dotPos > 0) fname = fname.substring(0, dotPos);
-                        // Strip "Artist - " prefix if it matches the album's artist
-                        if (g_currentAlbumArtist.length() > 0) {
-                            String prefix = g_currentAlbumArtist + " - ";
-                            if (fname.startsWith(prefix)) fname = fname.substring(prefix.length());
-                        }
-                        rows[rowCount].displayName = trackStr + " " + fname;
-                        if (rows[rowCount].displayName.length() > 30)
-                            rows[rowCount].displayName = rows[rowCount].displayName.substring(0, 29) + "~";
                     }
                 }
                 rowCount++;
@@ -1598,7 +2098,7 @@ public:
         }
 
         // All data in RAM — now clear only the content area and draw rows
-        M5Cardputer.Display.fillRect(0, HEADER_HEIGHT, M5Cardputer.Display.width(), contentH, C_BG_DARK);
+        M5Cardputer.Display.fillRect(0, HEADER_HEIGHT, M5Cardputer.Display.width(), contentH, C_BG_LIGHT);
 
         int yPos = contentY;
 
@@ -1616,13 +2116,16 @@ public:
                     M5Cardputer.Display.fillRect(2, yPos - 1, M5Cardputer.Display.width() - 4, ROW_HEIGHT, C_ACCENT);
                     M5Cardputer.Display.setTextColor(C_BG_DARK);
                 } else if (isPlaying) {
-                    M5Cardputer.Display.setTextColor(TFT_RED);
+                    if (userSettings.themeIndex == 2) // Retro Amber theme
+                        M5Cardputer.Display.setTextColor(C_HIGHLIGHT);
+                    else
+                        M5Cardputer.Display.setTextColor(C_PLAYING);
                 } else {
                     M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
                 }
 
-                M5Cardputer.Display.setCursor(6, yPos + 2);
-                if (isPlaying && !isSelected) M5Cardputer.Display.print("> ");
+                M5Cardputer.Display.setCursor(6, yPos);
+                if (isPlaying /* && !isSelected */) M5Cardputer.Display.print("> ");
                 M5Cardputer.Display.print(rows[i].displayName);
                 yPos += ROW_HEIGHT;
             }
@@ -1646,33 +2149,48 @@ public:
     // Full redraw of the now-playing area — called on state changes (play, pause, next, etc.)
     static void drawNowPlaying() {
         int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 5;
+
         M5Cardputer.Display.fillRect(xStart, yStart, M5Cardputer.Display.width() - xStart, 50, C_BG_DARK);
 
-        M5Cardputer.Display.setFont(&fonts::lgfxJapanGothic_12); M5Cardputer.Display.setTextColor(audioApp.isPaused ? TFT_ORANGE : C_PLAYING);
-        M5Cardputer.Display.setCursor(xStart + 5, yStart); M5Cardputer.Display.print(audioApp.isPaused ? "[PAUSED]" : "PLAYING >");
+        M5Cardputer.Display.setFont(TAG_FONT); M5Cardputer.Display.setTextColor(audioApp.isPaused ? TFT_RED : C_PLAYING);
+        M5Cardputer.Display.setCursor(xStart + NOW_PLAYING_PADDING_LEFT, yStart); M5Cardputer.Display.print(audioApp.isPaused ? "PAUSED" : "PLAYING");
 
         M5Cardputer.Display.setCursor(M5Cardputer.Display.width() - 55, yStart);
-        if (audioApp.isShuffle) { M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("SHF "); } else { M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("___ "); }
+        switch(audioApp.shuffleMode) {
+            case SHUF_OFF:   M5Cardputer.Display.print(" "); break;
+            case SHUF_ALBUM: M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.print("SA"); break;
+            case SHUF_ARTIST: M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("SR"); break;
+            case SHUF_GLOBAL: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("SG"); break;
+        }
 
+        M5Cardputer.Display.setCursor(M5Cardputer.Display.width() - 28, yStart);
         switch(audioApp.loopMode) {
-            case NO_LOOP: M5Cardputer.Display.setTextColor(C_BG_LIGHT); M5Cardputer.Display.print("1x"); break;
-            case LOOP_ALL: M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("LP"); break;
+            case NO_LOOP: M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.print("1x"); break;
+            case LOOP_ALL: M5Cardputer.Display.setTextColor(C_PLAYING); M5Cardputer.Display.print("LP"); break;
             case LOOP_ONE: M5Cardputer.Display.setTextColor(C_HIGHLIGHT); M5Cardputer.Display.print("1T"); break;
         }
 
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(xStart + 5, yStart + 16);
-        if (audioApp.currentTitle.length() > 0) M5Cardputer.Display.print(audioApp.currentTitle.substring(0, 15));
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(xStart + NOW_PLAYING_PADDING_LEFT, yStart + 13);
+        if (audioApp.currentTitle.length() > 0) {
+            String t = truncateToFit(audioApp.currentTitle, M5Cardputer.Display.width() - PLAYLIST_WIDTH - 20);
+            M5Cardputer.Display.print(t);
+        }
 
         drawProgressBar();
 
-        int volY = yStart + 42; M5Cardputer.Display.setCursor(xStart + 5, volY); M5Cardputer.Display.setFont(&fonts::Font0);
-        M5Cardputer.Display.setTextColor(C_ACCENT); M5Cardputer.Display.print("VOL "); M5Cardputer.Display.drawRect(xStart + 30, volY, 60, 6, C_BG_LIGHT);
+        int volY = yStart + 42;
+        M5Cardputer.Display.setCursor(xStart + NOW_PLAYING_PADDING_LEFT, volY); 
+        M5Cardputer.Display.setFont(&fonts::Font0);
+        M5Cardputer.Display.setTextColor(C_ACCENT); 
+        M5Cardputer.Display.print("VOL"); 
+        
+        M5Cardputer.Display.fillRect(xStart + 30, volY, 60, 6, C_BG_LIGHT);
         M5Cardputer.Display.fillRect(xStart + 31, volY + 1, (M5Cardputer.Speaker.getVolume() * 58) / 255, 4, C_ACCENT);
     }
 
     // Progress bar only — called every second in the loop, no flicker
     static void drawProgressBar() {
-        int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 5;
+        int xStart = PLAYLIST_WIDTH + 5, yStart = HEADER_HEIGHT + 6;
         int maxW = M5Cardputer.Display.width() - xStart - 10;
         float pos = 0, size = 1;
         if (audioApp.isPaused && audioApp.pausedSize > 0) {
@@ -1681,16 +2199,20 @@ public:
             pos = audioApp.id3->getPos(); size = audioApp.id3->getSize();
         }
         int curW = (size > 0) ? (int)(pos / size * maxW) : 0;
-        M5Cardputer.Display.fillRect(xStart-3, yStart+30-3, maxW+6, 9, C_BG_DARK); M5Cardputer.Display.fillRect(xStart, yStart+30, maxW, 3, C_BG_LIGHT);
-        M5Cardputer.Display.fillRect(xStart, yStart+30, min(curW, maxW), 3, C_HIGHLIGHT); M5Cardputer.Display.fillCircle(xStart + min(curW, maxW), yStart+30+1, 3, C_TEXT_MAIN);
+        M5Cardputer.Display.fillRect(xStart-3, yStart+30-3, maxW+6, 9, C_BG_DARK);
+        M5Cardputer.Display.fillRect(xStart, yStart+30, maxW, 3, C_BG_LIGHT);
+        M5Cardputer.Display.fillRect(xStart, yStart+30, min(curW, maxW), 3, C_HIGHLIGHT);
+
+        // Circle on track progress bar. Was disabled for a cleaner look
+        // M5Cardputer.Display.fillCircle(xStart + min(curW, maxW), yStart+30+1, 1, C_TEXT_MAIN);
     }
 
-    static void drawVisNowPlayingInfo(int textX, int maxChars) {
+    static void drawVisNowPlayingInfo(int textX, int maxPixels) {
         String artist = audioApp.currentArtist.length() > 0 ? audioApp.currentArtist : "Unknown Artist";
         String album = audioApp.currentAlbum.length() > 0 ? audioApp.currentAlbum : "Unknown Album";
-        visSprite.setFont(&fonts::Font0);
-        visSprite.setTextColor(C_TEXT_MAIN); visSprite.setCursor(textX, 4); visSprite.print(artist.substring(0, maxChars));
-        visSprite.setTextColor(C_TEXT_DIM); visSprite.setCursor(textX, 16); visSprite.print(album.substring(0, maxChars));
+        visSprite.setFont(TAG_FONT);
+        visSprite.setTextColor(C_TEXT_MAIN); visSprite.setCursor(textX, 4); visSprite.print(truncateToFit(artist, maxPixels));
+        visSprite.setTextColor(C_TEXT_DIM); visSprite.setCursor(textX, 16); visSprite.print(truncateToFit(album, maxPixels));
         int elapsedSec = audioApp.getElapsedSec();
         int totalSec = audioApp.getTotalSec();
         char timeStr[16];
@@ -1752,7 +2274,7 @@ public:
                     break;
                 }
             }
-            drawVisNowPlayingInfo(45, 12);
+            drawVisNowPlayingInfo(45, 73);
             visSprite.pushSprite(PLAYLIST_WIDTH + 2, HEADER_HEIGHT + 55);
             return;
         }
@@ -1760,7 +2282,7 @@ public:
         if (userSettings.visMode == 4) {
             // Text-only info — no animation, full width for text
             visSprite.fillScreen(C_BG_DARK);
-            drawVisNowPlayingInfo(4, 18);
+            drawVisNowPlayingInfo(4, 112);
             visSprite.pushSprite(PLAYLIST_WIDTH + 2, HEADER_HEIGHT + 55);
             return;
         }
@@ -1814,34 +2336,33 @@ public:
 
     static void drawSettings() {
         drawPopup("SETTINGS", "Press 'Esc' to Exit");
-        int startY = 45, gap = 20;
+        int startY = 40, gap = 20;
         int items = numSettings;
         for (int i = 0; i < 4; i++) {
             int idx = menuScrollOffset + i; if (idx >= items) break;
             M5Cardputer.Display.setCursor(25, startY + (i * gap));
-            M5Cardputer.Display.setTextColor(idx == settingsCursor ? (idx == 4 ? TFT_RED : C_HIGHLIGHT) : C_TEXT_MAIN);
+            M5Cardputer.Display.setTextColor(idx == settingsCursor ? C_HIGHLIGHT : C_TEXT_MAIN);
 
             switch (idx) {
-                case 0: M5Cardputer.Display.printf("Brightness: %d", userSettings.brightness); break;
-                case 1: M5Cardputer.Display.printf("Screen Off: %s", timeoutLabels[userSettings.timeoutIndex]); break;
-                case 2: M5Cardputer.Display.printf("Resume Play: %s", userSettings.resumePlay ? "ON" : "OFF"); break;
-                case 3: M5Cardputer.Display.printf("DAC Rate: %s", sampleRateLabels[userSettings.spkRateIndex]); break;
-                case 4: M5Cardputer.Display.printf("Seek Value: %d", userSettings.seek); break;
-                case 5: M5Cardputer.Display.printf("Wi-Fi Power: %s", userSettings.wifiEnabled ? "ON" : "OFF"); break;
-                case 6: M5Cardputer.Display.printf("Wi-Fi Mode: %s", userSettings.isAPMode ? "AP (Host)" : "STA (Client)"); break; 
-                case 7: M5Cardputer.Display.printf("Power Saver: %s", powerModeLabels[userSettings.powerSaverMode]); break;
-                case 8: M5Cardputer.Display.printf("Theme: %s", themeLabels[userSettings.themeIndex]); break;
-                case 9: M5Cardputer.Display.printf("Visualizer: %s", visModeLabels[userSettings.visMode]); break;
-                case 10: M5Cardputer.Display.print("> Setup Wi-Fi Network"); break; 
-                case 11: M5Cardputer.Display.print("> Setup AP (Host)"); break;
-                case 12: M5Cardputer.Display.print("[ RESCAN LIBRARY ]"); break;    
-                case 13: M5Cardputer.Display.print("[ EXPORT CONFIG TO SD ]"); break; 
-                case 14: M5Cardputer.Display.print("[ IMPORT FROM SD ]"); break;
-                case 15: M5Cardputer.Display.printf("Splash Screen: %s", userSettings.showSplash ? "ON" : "OFF"); break;
+                case 0: M5Cardputer.Display.printf("Brightness: %s", brightnessLabels[userSettings.brightnessIndex]); break;
+                case 1: M5Cardputer.Display.printf("Screen Time-Out: %s", timeoutLabels[userSettings.timeoutIndex]); break;
+                case 2: M5Cardputer.Display.printf("Power Saving: %s", powerModeLabels[userSettings.powerSaverMode]); break;
+                case 3: M5Cardputer.Display.printf("Theme: %s", themeLabels[userSettings.themeIndex]); break;
+                case 4: M5Cardputer.Display.printf("Boot Animation: %s", userSettings.showSplash ? "ON" : "OFF"); break;
+                case 5: M5Cardputer.Display.printf("Rewind Step: %d Sec", userSettings.seek); break;
+                case 6: M5Cardputer.Display.printf("Sample Rate: %s", sampleRateLabels[userSettings.spkRateIndex]); break;
+#ifdef ENABLE_WIFI
+                case IDX_WIFI_POWER: M5Cardputer.Display.printf("Wi-Fi: %s", userSettings.wifiEnabled ? "ON" : "OFF"); break;
+                case IDX_WIFI_MODE: M5Cardputer.Display.printf("Wi-Fi Mode: %s", userSettings.isAPMode ? "AP" : "STA"); break;
+                case IDX_WIFI_SETUP: M5Cardputer.Display.print("> Setup Wi-Fi"); break;
+                case IDX_WIFI_AP: M5Cardputer.Display.print("> Setup AP"); break;
+#endif
+                case IDX_UPDATE_LIB: M5Cardputer.Display.print("[ Update Library ]"); break;
             }
         }
     }
 
+#ifdef ENABLE_WIFI
     static void drawWifiScanner() {
         M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.fillRect(0, 0, M5Cardputer.Display.width(), HEADER_HEIGHT, C_HEADER);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(5, 5); M5Cardputer.Display.print("Select Wi-Fi Network");
@@ -1849,7 +2370,7 @@ public:
         if (wifiNetworkCount == 0) { M5Cardputer.Display.setCursor(10, yPos); M5Cardputer.Display.print("No networks found."); return; }
         for (int i = 0; i < 6; i++) {
             int idx = wifiScrollOffset + i; if (idx >= wifiNetworkCount) break;
-            if (idx == wifiCursor) { M5Cardputer.Display.fillRect(2, yPos - 2, M5Cardputer.Display.width() - 4, ROW_HEIGHT, C_ACCENT); M5Cardputer.Display.setTextColor(C_BG_DARK); } 
+            if (idx == wifiCursor) { M5Cardputer.Display.fillRect(2, yPos - 2, M5Cardputer.Display.width() - 4, ROW_HEIGHT, C_ACCENT); M5Cardputer.Display.setTextColor(C_BG_DARK); }
             else M5Cardputer.Display.setTextColor(C_TEXT_MAIN);
             M5Cardputer.Display.setCursor(10, yPos); M5Cardputer.Display.print(WiFi.SSID(idx).substring(0, 30)); yPos += ROW_HEIGHT;
         }
@@ -1857,19 +2378,20 @@ public:
 
     static void drawTextInput() {
         M5Cardputer.Display.fillScreen(C_BG_DARK); M5Cardputer.Display.fillRect(0, 0, M5Cardputer.Display.width(), HEADER_HEIGHT, C_HEADER);
-        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(5, 5); 
+        M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(5, 5);
         if (textInputTarget == 0) M5Cardputer.Display.print("Enter Client Password:");
         else if (textInputTarget == 1) M5Cardputer.Display.print("Set AP Name (SSID):");
         else if (textInputTarget == 2) M5Cardputer.Display.print("Set AP Password (8+ chars):");
 
         M5Cardputer.Display.drawRect(10, HEADER_HEIGHT + 35, M5Cardputer.Display.width() - 20, 25, C_TEXT_MAIN);
         M5Cardputer.Display.setTextColor(C_TEXT_MAIN); M5Cardputer.Display.setCursor(15, HEADER_HEIGHT + 40);
-        
+
         String displayStr = enteredText;
         if (textInputTarget == 0) { displayStr = ""; for(int i=0; i<(int)enteredText.length(); i++) displayStr += "*"; }
-        M5Cardputer.Display.print(displayStr + "_"); 
+        M5Cardputer.Display.print(displayStr + "_");
         M5Cardputer.Display.setCursor(10, M5Cardputer.Display.height() - 20); M5Cardputer.Display.setTextColor(C_TEXT_DIM); M5Cardputer.Display.print("ENTER to Save  |  ` to Cancel");
     }
+#endif
 
     static void drawBaseUI() {
         M5Cardputer.Display.fillRect(0, HEADER_HEIGHT, M5Cardputer.Display.width(), M5Cardputer.Display.height() - HEADER_HEIGHT, C_BG_DARK);
@@ -1879,7 +2401,9 @@ public:
 };
 
 int UIManager::settingsCursor = 0; int UIManager::menuScrollOffset = 0; bool UIManager::showVisualizer = true;
+#ifdef ENABLE_WIFI
 int UIManager::wifiCursor = 0; int UIManager::wifiScrollOffset = 0; int UIManager::wifiNetworkCount = 0;
+#endif
 int UIManager::helpScrollOffset = 0;
 
 void AudioEngine::MDCallback(void *cbData, const char *type, bool isUnicode, const char *string) {
@@ -1889,6 +2413,7 @@ void AudioEngine::MDCallback(void *cbData, const char *type, bool isUnicode, con
     else if (strcmp(type, "Album") == 0) { audioApp.currentAlbum = String(string); }
 }
 
+#ifdef ENABLE_WIFI
 // ==========================================
 // WEB SERVER MANAGER
 // ==========================================
@@ -2014,6 +2539,7 @@ player.addEventListener('ended',playNext);
         server.begin();
     }
 };
+#endif // ENABLE_WIFI
 
 // ==========================================
 // BOOT MENU
@@ -2806,7 +3332,7 @@ public:
             delay(50);
         }
         
-        M5Cardputer.Display.setBrightness(userSettings.brightness);
+        M5Cardputer.Display.setBrightness(brightnessValues[userSettings.brightnessIndex]);
     }
 };
 
@@ -2864,8 +3390,10 @@ void setup() {
         }
     }
 
+#ifdef ENABLE_WIFI
     WebServerManager::setup();
-    M5Cardputer.Display.setBrightness(userSettings.brightness);
+#endif
+    M5Cardputer.Display.setBrightness(brightnessValues[userSettings.brightnessIndex]);
 
     // Show splash screen animation
     if (userSettings.showSplash) SplashScreen::show();
@@ -2875,7 +3403,7 @@ void setup() {
     M5Cardputer.Speaker.setVolume(userSettings.volume);
 
     if (audioApp.loadPlaylist()) {
-        if (userSettings.resumePlay && userSettings.lastIndex < (int)audioApp.songOffsets.size())
+        if (userSettings.lastIndex < (int)audioApp.songOffsets.size())
             audioApp.play(userSettings.lastIndex, userSettings.lastPos);
         else audioApp.play(0);
     } else {
@@ -2886,12 +3414,23 @@ void setup() {
 
     // Load album index for sidebar
     loadAlbumIndex();
+
+    // Restore album playback context if saved
+    if (userSettings.lastAlbumIdx >= 0 && userSettings.lastAlbumIdx < (int)g_albumOffsets.size()) {
+        loadAlbumSongs(userSettings.lastAlbumIdx);
+        g_albumPlaybackActive = true;
+        g_albumPlaybackIndex = constrain(userSettings.lastAlbumTrack, 0, max(0, (int)g_albumSongOffsets.size() - 1));
+    }
     
     UIManager::drawBaseUI(); lastInputTime = millis();
 }
 
 void loop() {
-    M5Cardputer.update(); server.handleClient(); audioApp.loopTasks();
+    M5Cardputer.update();
+#ifdef ENABLE_WIFI
+    server.handleClient();
+#endif
+    audioApp.loopTasks();
     static int lastPlayingIndex = -1;
     if (lastPlayingIndex != audioApp.currentIndex && currentState == UI_PLAYER && !isScreenOff) {
         lastPlayingIndex = audioApp.currentIndex;
@@ -2906,8 +3445,11 @@ void loop() {
         static unsigned long lastProg = 0; if (millis() - lastProg > 1000) { UIManager::drawProgressBar(); lastProg = millis(); }
     }
 
-    if (userSettings.timeoutIndex > 0 && !isScreenOff) {
-        if (millis() - lastInputTime > timeoutValues[userSettings.timeoutIndex]) { M5Cardputer.Display.setBrightness(0); M5Cardputer.Display.sleep(); isScreenOff = true; }
+    if (!isScreenOff) {
+        if (millis() - lastInputTime > timeoutValues[userSettings.timeoutIndex]) {
+            M5Cardputer.Display.setBrightness(0); M5Cardputer.Display.sleep(); isScreenOff = true;
+            applyCpuForState(!audioApp.isPaused, true); // drop CPU when screen off
+        }
     }
 
     if(M5Cardputer.BtnA.wasDecideClickCount()){
@@ -2919,7 +3461,17 @@ void loop() {
     }
 
     if (M5Cardputer.Keyboard.isChange() && M5Cardputer.Keyboard.isPressed()) {
-        if (isScreenOff) { M5Cardputer.Display.wakeup(); M5Cardputer.Display.setBrightness(userSettings.brightness); isScreenOff = false; lastInputTime = millis(); UIManager::drawBaseUI(); return; }
+        if (isScreenOff) {
+            M5Cardputer.Display.wakeup(); M5Cardputer.Display.setBrightness(brightnessValues[userSettings.brightnessIndex]); isScreenOff = false; lastInputTime = millis();
+            applyCpuForState(!audioApp.isPaused, false); // restore CPU for UI rendering
+            if (currentState == UI_ALBUM_SONGS) UIManager::drawAlbumSongs();
+            else if (currentState == UI_SETTINGS) UIManager::drawSettings();
+            else if (currentState == UI_HELP) UIManager::drawHelp();
+            else if (currentState == UI_SEARCH) UIManager::drawSearch();
+            else if (currentState == UI_TRACK_INFO) UIManager::drawTrackInfo();
+            else UIManager::drawBaseUI();
+            return;
+        }
         lastInputTime = millis();
 
         switch (currentState) {
@@ -2961,6 +3513,7 @@ void loop() {
                             UIManager::drawPlaylist();
                         } else {
                             // Open album
+                            g_trackNumInput = "";
                             loadAlbumSongs(row.dataIdx);
                             // Position cursor on currently playing song if in this album
                             String currentPath = audioApp.getSongPath(audioApp.currentIndex);
@@ -3002,7 +3555,17 @@ void loop() {
                     g_searchQuery = ""; g_searchResults.clear(); g_searchCursor = 0; g_searchScrollOffset = 0;
                     currentState = UI_SEARCH; UIManager::drawSearch();
                 }
-                else if (M5Cardputer.Keyboard.isKeyPressed('f')) { audioApp.isShuffle = !audioApp.isShuffle; UIManager::drawNowPlaying(); }
+                else if (M5Cardputer.Keyboard.isKeyPressed('f')) {
+                    // Cycle: OFF -> ALBUM -> ARTIST -> GLOBAL -> OFF
+                    audioApp.shuffleMode = (ShuffleMode)((audioApp.shuffleMode + 1) % 4);
+                    if (audioApp.shuffleMode != SHUF_OFF) {
+                        int curVal = (audioApp.shuffleMode == SHUF_ALBUM) ? g_albumPlaybackIndex : audioApp.currentIndex;
+                        buildShuffleQueue(audioApp.shuffleMode, curVal, audioApp.songOffsets.size());
+                    } else {
+                        g_shuffleQueue.clear(); g_shufflePos = 0;
+                    }
+                    UIManager::drawNowPlaying();
+                }
                 else if (M5Cardputer.Keyboard.isKeyPressed('l')) { audioApp.loopMode = (LoopState)((audioApp.loopMode + 1) % 3); UIManager::drawNowPlaying(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed('v')) {
                     userSettings.visMode = (userSettings.visMode + 1) % NUM_VIS_MODES;
@@ -3031,41 +3594,34 @@ void loop() {
                 else if (M5Cardputer.Keyboard.isKeyPressed('/') || M5Cardputer.Keyboard.isKeyPressed(',')) {
                     bool right = M5Cardputer.Keyboard.isKeyPressed('/');
                     switch (UIManager::settingsCursor) {
-                        case 0: userSettings.brightness = constrain(userSettings.brightness + (right?25:-25), 5, 255); M5Cardputer.Display.setBrightness(userSettings.brightness); break;
-                        case 1: userSettings.timeoutIndex = (userSettings.timeoutIndex + (right?1:-1) + 5) % 5; break;
-                        case 2: userSettings.resumePlay = !userSettings.resumePlay; break;
-                        case 3: userSettings.spkRateIndex = (userSettings.spkRateIndex + (right?1:-1) + 5) % 5; 
+                        case 0: userSettings.brightnessIndex = (userSettings.brightnessIndex + (right?1:-1) + 5) % 5; M5Cardputer.Display.setBrightness(brightnessValues[userSettings.brightnessIndex]); break;
+                        case 1: userSettings.timeoutIndex = (userSettings.timeoutIndex + (right?1:-1) + 6) % 6; break;
+                        case 2: userSettings.powerSaverMode = (userSettings.powerSaverMode + (right?1:-1) + 3) % 3; applyCpuFrequency(); break;
+                        case 3: userSettings.themeIndex = (userSettings.themeIndex + (right?1:-1) + NUM_THEMES) % NUM_THEMES; applyTheme(userSettings.themeIndex); UIManager::drawBaseUI(); break;
+                        case 4: userSettings.showSplash = !userSettings.showSplash; break;
+                        case 5: userSettings.seek = constrain(userSettings.seek + (right?5:-5), 5, 60); break;
+                        case 6: userSettings.spkRateIndex = (userSettings.spkRateIndex + (right?1:-1) + 5) % 5;
                                 { auto c = M5Cardputer.Speaker.config(); c.sample_rate = sampleRateValues[userSettings.spkRateIndex]; M5Cardputer.Speaker.config(c); } break;
-                        case 4: userSettings.seek = constrain(userSettings.seek + (right?5:-5), 5, 60); break;
-                        case 5: userSettings.wifiEnabled = !userSettings.wifiEnabled; break;
-                        case 6: userSettings.isAPMode = !userSettings.isAPMode; break;
-                        case 7: userSettings.powerSaverMode = (userSettings.powerSaverMode + (right?1:-1) + 3) % 3; applyCpuFrequency(); break;
-                        case 8:
-                            userSettings.themeIndex = (userSettings.themeIndex + (right?1:-1) + NUM_THEMES) % NUM_THEMES;
-                            applyTheme(userSettings.themeIndex);
-                            UIManager::drawBaseUI();
-                            break;
-                        case 9:
-                            userSettings.visMode = (userSettings.visMode + (right?1:-1) + NUM_VIS_MODES) % NUM_VIS_MODES;
-                            UIManager::drawBaseUI();
-                            break;
-                        case 15: userSettings.showSplash = !userSettings.showSplash; break;
+#ifdef ENABLE_WIFI
+                        case IDX_WIFI_POWER: userSettings.wifiEnabled = !userSettings.wifiEnabled; break;
+                        case IDX_WIFI_MODE: userSettings.isAPMode = !userSettings.isAPMode; break;
+#endif
                     }
                     UIManager::drawSettings();
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
-                    switch(UIManager::settingsCursor) {
-                        case 10: // Wi-Fi Setup
-                            currentState = UI_WIFI_SCAN; WiFi.mode(WIFI_STA); WiFi.disconnect(); delay(100);
-                            UIManager::wifiNetworkCount = WiFi.scanNetworks(); UIManager::wifiCursor = 0; UIManager::wifiScrollOffset = 0;
-                            UIManager::drawWifiScanner(); break;
-                        case 11: // AP Setup
-                            currentState = UI_TEXT_INPUT; textInputTarget = 1; enteredText = userSettings.apSSID;
-                            UIManager::drawTextInput(); break;
-                        case 12: audioApp.performFullScan(); loadAlbumIndex(); currentState = UI_PLAYER; UIManager::drawBaseUI(); break;
-                        case 13: ConfigManager::exportToSD(); currentState = UI_PLAYER; UIManager::drawBaseUI(); break;
-                        case 14: ConfigManager::importFromSD(); currentState = UI_PLAYER; UIManager::drawBaseUI(); break;
-                    }
+                    int enterIdx = UIManager::settingsCursor;
+#ifdef ENABLE_WIFI
+                    if (enterIdx == IDX_WIFI_SETUP) {
+                        currentState = UI_WIFI_SCAN; WiFi.mode(WIFI_STA); WiFi.disconnect(); delay(100);
+                        UIManager::wifiNetworkCount = WiFi.scanNetworks(); UIManager::wifiCursor = 0; UIManager::wifiScrollOffset = 0;
+                        UIManager::drawWifiScanner();
+                    } else if (enterIdx == IDX_WIFI_AP) {
+                        currentState = UI_TEXT_INPUT; textInputTarget = 1; enteredText = userSettings.apSSID;
+                        UIManager::drawTextInput();
+                    } else
+#endif
+                    if (enterIdx == IDX_UPDATE_LIB) { audioApp.performFullScan(); loadAlbumIndex(); currentState = UI_PLAYER; UIManager::drawBaseUI(); }
                 }
                 break;
 
@@ -3091,6 +3647,7 @@ void loop() {
                 }
                 break;
 
+#ifdef ENABLE_WIFI
             case UI_WIFI_SCAN:
                 if (M5Cardputer.Keyboard.isKeyPressed('`')) { currentState = UI_SETTINGS; UIManager::drawSettings(); }
                 else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
@@ -3114,20 +3671,21 @@ void loop() {
             case UI_TEXT_INPUT:
                 {
                 auto status = M5Cardputer.Keyboard.keysState(); bool redraw = false;
-                if (status.del && enteredText.length() > 0) { enteredText.remove(enteredText.length() - 1); redraw = true; } 
+                if (status.del && enteredText.length() > 0) { enteredText.remove(enteredText.length() - 1); redraw = true; }
                 else if (status.enter) {
-                    if (textInputTarget == 0) { userSettings.wifiPass = enteredText; userSettings.wifiEnabled = true; ConfigManager::save(); ESP.restart(); } 
-                    else if (textInputTarget == 1) { userSettings.apSSID = enteredText; textInputTarget = 2; enteredText = userSettings.apPass; redraw = true; } 
+                    if (textInputTarget == 0) { userSettings.wifiPass = enteredText; userSettings.wifiEnabled = true; ConfigManager::save(); ESP.restart(); }
+                    else if (textInputTarget == 1) { userSettings.apSSID = enteredText; textInputTarget = 2; enteredText = userSettings.apPass; redraw = true; }
                     else if (textInputTarget == 2) {
-                        if (enteredText.length() < 8) { M5Cardputer.Display.setCursor(15, HEADER_HEIGHT + 65); M5Cardputer.Display.setTextColor(TFT_RED); M5Cardputer.Display.print("Must be 8+ chars!"); delay(1000); redraw = true; } 
+                        if (enteredText.length() < 8) { M5Cardputer.Display.setCursor(15, HEADER_HEIGHT + 65); M5Cardputer.Display.setTextColor(TFT_RED); M5Cardputer.Display.print("Must be 8+ chars!"); delay(1000); redraw = true; }
                         else { userSettings.apPass = enteredText; userSettings.isAPMode = true; userSettings.wifiEnabled = true; ConfigManager::save(); ESP.restart(); }
                     }
-                } 
-                else if (M5Cardputer.Keyboard.isKeyPressed('`')) { currentState = UI_SETTINGS; UIManager::drawSettings(); } 
+                }
+                else if (M5Cardputer.Keyboard.isKeyPressed('`')) { currentState = UI_SETTINGS; UIManager::drawSettings(); }
                 else { for (char c : status.word) { enteredText += c; redraw = true; } }
                 if (redraw) UIManager::drawTextInput();
                 }
                 break;
+#endif
 
             // --------------------------------------------------
             // SEARCH STATE
@@ -3137,8 +3695,13 @@ void loop() {
                 auto status = M5Cardputer.Keyboard.keysState(); bool redraw = false;
                 if (M5Cardputer.Keyboard.isKeyPressed('`')) {
                     currentState = UI_PLAYER; UIManager::drawBaseUI();
+                } else if (status.tab) {
+                    // Tab: cycle keyboard layout
+                    userSettings.kbLayoutIndex = (userSettings.kbLayoutIndex + 1) % NUM_LAYOUTS;
+                    ConfigManager::save();
+                    redraw = true;
                 } else if (status.del && g_searchQuery.length() > 0) {
-                    g_searchQuery.remove(g_searchQuery.length() - 1);
+                    removeLastUtf8Char(g_searchQuery);
                     UIManager::rebuildSearchResults(); redraw = true;
                 } else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
                     if (g_searchResults.size() > 0) {
@@ -3146,27 +3709,36 @@ void loop() {
                         if (g_searchCursor < 0) g_searchCursor = (int)g_searchResults.size() - 1;
                         if (g_searchCursor < g_searchScrollOffset) g_searchScrollOffset = g_searchCursor;
                         if (g_searchCursor == (int)g_searchResults.size() - 1)
-                            g_searchScrollOffset = max(0, (int)g_searchResults.size() - MAX_VISIBLE_ROWS);
+                            g_searchScrollOffset = max(0, (int)g_searchResults.size() - SEARCH_VISIBLE_ROWS);
                     }
                     redraw = true;
                 } else if (M5Cardputer.Keyboard.isKeyPressed('.')) {
                     if (g_searchResults.size() > 0) {
                         g_searchCursor++;
                         if (g_searchCursor >= (int)g_searchResults.size()) { g_searchCursor = 0; g_searchScrollOffset = 0; }
-                        if (g_searchCursor >= g_searchScrollOffset + MAX_VISIBLE_ROWS) g_searchScrollOffset++;
+                        if (g_searchCursor >= g_searchScrollOffset + SEARCH_VISIBLE_ROWS) g_searchScrollOffset++;
                     }
                     redraw = true;
                 } else if (status.enter) {
                     if (g_searchResults.size() > 0) {
                         int songIdx = g_searchResults[g_searchCursor];
-                        g_albumPlaybackActive = false; // Exit album-scoped playback
+                        g_albumPlaybackActive = false;
+                        userSettings.lastAlbumIdx = -1;
                         audioApp.play(songIdx);
                         currentState = UI_PLAYER;
                         UIManager::drawBaseUI();
                     }
                 } else {
                     for (char c : status.word) {
-                        g_searchQuery += c; redraw = true;
+                        LayoutMapFn mapper = g_layouts[userSettings.kbLayoutIndex];
+                        if (mapper) {
+                            const char* mapped = mapper(c);
+                            if (mapped) g_searchQuery += mapped;
+                            else g_searchQuery += c;
+                        } else {
+                            g_searchQuery += c;
+                        }
+                        redraw = true;
                     }
                     if (redraw) UIManager::rebuildSearchResults();
                 }
@@ -3178,12 +3750,28 @@ void loop() {
             // ALBUM SONGS STATE
             // --------------------------------------------------
             case UI_ALBUM_SONGS:
+                {
+                // Auto-clear digit input after timeout
+                if (g_trackNumInput.length() > 0 && millis() - g_trackNumLastInput > TRACK_NUM_TIMEOUT) {
+                    g_trackNumInput = "";
+                    UIManager::drawAlbumSongsFooter(); // restore normal footer
+                }
+
+                auto status = M5Cardputer.Keyboard.keysState();
+
                 if (M5Cardputer.Keyboard.isKeyPressed('`')) {
-                    // Back to player (album list)
+                    g_trackNumInput = "";
                     currentState = UI_PLAYER;
                     UIManager::drawBaseUI();
                 }
+                else if (status.del) {
+                    if (g_trackNumInput.length() > 0) {
+                        g_trackNumInput = "";
+                        UIManager::drawAlbumSongsFooter();
+                    }
+                }
                 else if (M5Cardputer.Keyboard.isKeyPressed(';')) {
+                    g_trackNumInput = "";
                     if (g_albumSongOffsets.size() > 0) {
                         g_albumSongCursor--;
                         if (g_albumSongCursor < 0) g_albumSongCursor = (int)g_albumSongOffsets.size() - 1;
@@ -3194,6 +3782,7 @@ void loop() {
                     UIManager::drawAlbumSongsList();
                 }
                 else if (M5Cardputer.Keyboard.isKeyPressed('.')) {
+                    g_trackNumInput = "";
                     if (g_albumSongOffsets.size() > 0) {
                         g_albumSongCursor++;
                         if (g_albumSongCursor >= (int)g_albumSongOffsets.size()) { g_albumSongCursor = 0; g_albumSongScrollOffset = 0; }
@@ -3201,7 +3790,8 @@ void loop() {
                     }
                     UIManager::drawAlbumSongsList();
                 }
-                else if (M5Cardputer.Keyboard.isKeyPressed(KEY_ENTER)) {
+                else if (status.enter) {
+                    g_trackNumInput = "";
                     if (g_albumSongOffsets.size() > 0) {
                         String songPath = getAlbumSongPath(g_albumSongCursor);
                         int globalIdx = findSongInPlaylist(songPath);
@@ -3209,11 +3799,32 @@ void loop() {
                             audioApp.play(globalIdx);
                             g_albumPlaybackActive = true;
                             g_albumPlaybackIndex = g_albumSongCursor;
+                            if (audioApp.shuffleMode == SHUF_ALBUM) buildShuffleQueue(SHUF_ALBUM, g_albumPlaybackIndex);
+                            userSettings.lastAlbumIdx = g_currentAlbumIdx;
+                            userSettings.lastAlbumTrack = g_albumPlaybackIndex;
                             ConfigManager::save(audioApp.id3 ? audioApp.id3->getPos() : 0, audioApp.currentIndex);
                         }
                         currentState = UI_PLAYER;
                         UIManager::drawBaseUI();
                     }
+                }
+                else {
+                    // Check for digit input (max 3 digits, then restart)
+                    bool digitEntered = false;
+                    for (char c : status.word) {
+                        if (c >= '0' && c <= '9') {
+                            if (g_trackNumInput.length() >= 3) g_trackNumInput = "";
+                            g_trackNumInput += c;
+                            g_trackNumLastInput = millis();
+                            digitEntered = true;
+                        }
+                    }
+                    if (digitEntered) {
+                        applyTrackNumInput();
+                        UIManager::drawAlbumSongsList();
+                        UIManager::drawAlbumSongsFooter();
+                    }
+                }
                 }
                 break;
         }
